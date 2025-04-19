@@ -2,6 +2,7 @@ package scheduler
 
 // TaskStatus represents the current status of a task
 type TaskStatus string
+type TaskType string
 
 // Task status constants
 const (
@@ -15,9 +16,14 @@ const (
 	StatusFailed TaskStatus = "failed"
 	// StatusDisabled indicates a task that is disabled
 	StatusDisabled TaskStatus = "disabled"
+
+	TypeShellCommand TaskType = "shell_command"
+	TypeAI           TaskType = "AI"
 )
 
 // String returns the string representation of the status, making it easier to use in string contexts
 func (s TaskStatus) String() string {
 	return string(s)
 }
+
+func (t TaskType) String() string { return string(t) }

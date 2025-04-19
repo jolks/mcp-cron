@@ -12,8 +12,8 @@ import (
 	"time"
 )
 
-// CommandResult contains the results of a command execution
-type CommandResult struct {
+// Result contains the results of a command execution
+type Result struct {
 	Command   string    `json:"command"`
 	ExitCode  int       `json:"exit_code"`
 	Output    string    `json:"output"`
@@ -27,18 +27,18 @@ type CommandResult struct {
 // CommandExecutor handles executing commands
 type CommandExecutor struct {
 	mu      sync.Mutex
-	results map[string]*CommandResult // Map of taskID -> CommandResult
+	results map[string]*Result // Map of taskID -> Result
 }
 
 // NewCommandExecutor creates a new command executor
 func NewCommandExecutor() *CommandExecutor {
 	return &CommandExecutor{
-		results: make(map[string]*CommandResult),
+		results: make(map[string]*Result),
 	}
 }
 
 // ExecuteCommand executes a shell command with a timeout
-func (e *CommandExecutor) ExecuteCommand(ctx context.Context, taskID, command string, timeout time.Duration) *CommandResult {
+func (ce *CommandExecutor) ExecuteCommand(ctx context.Context, taskID, command string, timeout time.Duration) *Result {
 	// Create a cancellable context with timeout
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
 	defer cancel()
@@ -50,16 +50,17 @@ func (e *CommandExecutor) ExecuteCommand(ctx context.Context, taskID, command st
 	cmd.Stderr = &stderr
 
 	// Create result object
-	result := &CommandResult{
+	// Set Output to stdout.String() later so can see from get_task tool?
+	result := &Result{
 		Command:   command,
 		StartTime: time.Now(),
 		TaskID:    taskID,
 	}
 
 	// Store the result
-	e.mu.Lock()
-	e.results[taskID] = result
-	e.mu.Unlock()
+	ce.mu.Lock()
+	ce.results[taskID] = result
+	ce.mu.Unlock()
 
 	// Execute the command
 	err := cmd.Run()

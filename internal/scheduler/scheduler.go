@@ -15,6 +15,7 @@ type Task struct {
 	ID          string
 	Name        string
 	Schedule    string
+	Type        string
 	Command     string
 	Description string
 	Enabled     bool
@@ -28,6 +29,7 @@ type Task struct {
 // TaskExecutor defines the interface for executing tasks
 type TaskExecutor interface {
 	ExecuteTask(task *Task) error
+	Execute(ctx context.Context, task *Task, timeout time.Duration) error
 }
 
 // Scheduler manages cron tasks

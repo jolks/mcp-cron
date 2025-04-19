@@ -4,6 +4,7 @@ go 1.22.2
 
 require (
 	github.com/ThinkInAIXYZ/go-mcp v0.1.6
+	github.com/openai/openai-go v0.1.0-beta.10
 	github.com/robfig/cron/v3 v3.0.1
 )
 
@@ -16,7 +17,8 @@ require (
 	github.com/orcaman/concurrent-map/v2 v2.0.1 // indirect
 	github.com/tidwall/gjson v1.18.0 // indirect
 	github.com/tidwall/match v1.1.1 // indirect
-	github.com/tidwall/pretty v1.2.0 // indirect
+	github.com/tidwall/pretty v1.2.1 // indirect
+	github.com/tidwall/sjson v1.2.5 // indirect
 	github.com/twitchyliquid64/golang-asm v0.15.1 // indirect
 	github.com/yosida95/uritemplate/v3 v3.0.2 // indirect
 	golang.org/x/arch v0.0.0-20210923205945-b76863e36670 // indirect

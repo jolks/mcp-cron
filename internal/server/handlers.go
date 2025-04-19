@@ -16,11 +16,6 @@ type successResponse struct {
 	Message string `json:"message"`
 }
 
-// TaskIDParams holds the ID parameter used by multiple handlers
-type TaskIDParams struct {
-	ID string `json:"id" description:"the ID of the task to retrieve/remove/enable/disable"`
-}
-
 // extractParams extracts and validates parameters from a request
 func extractParams(request *protocol.CallToolRequest, params interface{}) error {
 	if err := utils.JsonUnmarshal(request.RawArguments, params); err != nil {

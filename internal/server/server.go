@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -28,9 +29,24 @@ type TaskParams struct {
 	ID          string `json:"id,omitempty" description:"task ID"`
 	Name        string `json:"name,omitempty" description:"task name"`
 	Schedule    string `json:"schedule,omitempty" description:"cron schedule expression"`
+	Type        string `json:"type,omitempty" description:"task type"`
 	Command     string `json:"command,omitempty" description:"command to execute"`
 	Description string `json:"description,omitempty" description:"task description"`
 	Enabled     bool   `json:"enabled,omitempty" description:"whether the task is enabled"`
+}
+
+// TaskIDParams holds the ID parameter used by multiple handlers
+type TaskIDParams struct {
+	ID string `json:"id" description:"the ID of the task to get/remove/enable/disable"`
+}
+
+type AIParams struct {
+	Prompt string `json:"prompt,omitempty" description:"prompt to use for AI"`
+}
+
+type AITaskParams struct {
+	TaskParams
+	AIParams
 }
 
 // MCPServer represents the MCP scheduler server
@@ -222,7 +238,7 @@ func (s *MCPServer) handleGetTask(request *protocol.CallToolRequest) (*protocol.
 	return createTaskResponse(task)
 }
 
-// handleAddTask adds a new task
+// handleAddTask adds a new shell command task
 func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract parameters
 	var params TaskParams
@@ -239,8 +255,50 @@ func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.
 		ID:          taskID,
 		Name:        params.Name,
 		Schedule:    params.Schedule,
+		Type:        scheduler.TypeShellCommand.String(),
 		Command:     params.Command,
 		Description: params.Description,
+		Enabled:     params.Enabled,
+		Status:      scheduler.StatusPending.String(),
+		LastRun:     time.Now(),
+		NextRun:     time.Now(),
+		CreatedAt:   time.Now(),
+		UpdatedAt:   time.Now(),
+	}
+
+	// Add task to scheduler
+	if err := s.scheduler.AddTask(task); err != nil {
+		return createErrorResponse(err)
+	}
+
+	return createTaskResponse(task)
+}
+
+func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+	// Extract parameters
+	var params AITaskParams
+
+	if err := extractParams(request, &params); err != nil {
+		return createErrorResponse(err)
+	}
+
+	s.logger.Debugf("Handling add_ai_task request for task %s", params.Name)
+
+	aiParams, err := json.Marshal(AIParams{
+		Prompt: params.Prompt,
+	})
+	if err != nil {
+		return createErrorResponse(err)
+	}
+	// Create task
+	taskID := fmt.Sprintf("task_%d", time.Now().UnixNano())
+	task := &scheduler.Task{
+		ID:          taskID,
+		Name:        params.Name,
+		Schedule:    params.Schedule,
+		Type:        scheduler.TypeAI.String(),
+		Command:     params.Command,
+		Description: string(aiParams),
 		Enabled:     params.Enabled,
 		Status:      scheduler.StatusPending.String(),
 		LastRun:     time.Now(),
@@ -375,13 +433,17 @@ func (s *MCPServer) handleDisableTask(request *protocol.CallToolRequest) (*proto
 	return createTaskResponse(task)
 }
 
-// ExecuteTask implements the scheduler.TaskExecutor interface
+// ExecuteTask delegates to correct executor based on task type
 func (s *MCPServer) ExecuteTask(task *scheduler.Task) error {
 	logger := logging.GetDefaultLogger().WithField("task_id", task.ID)
 	logger.Infof("Executing task: %s", task.Name)
 
 	// Execute the command with the configured timeout
 	ctx := context.Background()
+
+	if task.Type == scheduler.TypeAI.String() {
+
+	}
 	result := s.executor.ExecuteCommand(ctx, task.ID, task.Command, s.config.Scheduler.DefaultTimeout)
 
 	if result.Error != "" {
