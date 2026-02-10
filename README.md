@@ -108,7 +108,11 @@ The following environment variables are supported:
 | `MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT` | Default timeout for task execution | `10m` |
 | `MCP_CRON_LOGGING_LEVEL` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `MCP_CRON_LOGGING_FILE` | Log file path | stdout |
+| `MCP_CRON_AI_PROVIDER` | AI provider: `openai` or `anthropic` | `openai` |
+| `MCP_CRON_AI_BASE_URL` | Custom base URL for OpenAI-compatible endpoints (e.g. Ollama, vLLM, Groq, LiteLLM) | Not set |
+| `MCP_CRON_AI_API_KEY` | Generic fallback API key (used when provider-specific key is not set) | Not set |
 | `OPENAI_API_KEY` | OpenAI API key for AI tasks | Not set |
+| `ANTHROPIC_API_KEY` | Anthropic API key for AI tasks | Not set |
 | `MCP_CRON_ENABLE_OPENAI_TESTS` | Enable OpenAI integration tests | `false` |
 | `MCP_CRON_AI_MODEL` | LLM model to use for AI tasks | `gpt-4o` |
 | `MCP_CRON_AI_MAX_TOOL_ITERATIONS` | Maximum iterations for tool-enabled tasks | `20` |

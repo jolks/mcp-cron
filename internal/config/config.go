@@ -60,8 +60,23 @@ type LoggingConfig struct {
 
 // AIConfig holds AI-specific configuration
 type AIConfig struct {
+	// Provider selects the LLM backend: "openai" (default) or "anthropic"
+	Provider string
+
+	// BaseURL overrides the API endpoint for OpenAI-compatible providers
+	// (e.g. Ollama, vLLM, Groq). Empty means use the default.
+	BaseURL string
+
+	// APIKey is a generic fallback API key used when the provider-specific
+	// key is not set. Loaded from MCP_CRON_AI_API_KEY.
+	APIKey string
+
 	// OpenAI API key
 	OpenAIAPIKey string
+
+	// AnthropicAPIKey is the API key for the Anthropic provider.
+	// Loaded from ANTHROPIC_API_KEY.
+	AnthropicAPIKey string
 
 	// Enable OpenAI integration tests
 	EnableOpenAITests bool
@@ -94,7 +109,11 @@ func DefaultConfig() *Config {
 			FilePath: "",
 		},
 		AI: AIConfig{
+			Provider:          "openai",
+			BaseURL:           "",
+			APIKey:            "",
 			OpenAIAPIKey:      "",
+			AnthropicAPIKey:   "",
 			EnableOpenAITests: false,
 			Model:             "gpt-4o",
 			MaxToolIterations: 20,
@@ -177,8 +196,24 @@ func FromEnv(config *Config) {
 	}
 
 	// AI configuration
+	if val := os.Getenv("MCP_CRON_AI_PROVIDER"); val != "" {
+		config.AI.Provider = val
+	}
+
+	if val := os.Getenv("MCP_CRON_AI_BASE_URL"); val != "" {
+		config.AI.BaseURL = val
+	}
+
+	if val := os.Getenv("MCP_CRON_AI_API_KEY"); val != "" {
+		config.AI.APIKey = val
+	}
+
 	if val := os.Getenv("OPENAI_API_KEY"); val != "" {
 		config.AI.OpenAIAPIKey = val
+	}
+
+	if val := os.Getenv("ANTHROPIC_API_KEY"); val != "" {
+		config.AI.AnthropicAPIKey = val
 	}
 
 	if val := os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS"); val != "" {

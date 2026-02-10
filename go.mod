@@ -5,6 +5,7 @@ go 1.23.0
 toolchain go1.23.8
 
 require (
+	github.com/anthropics/anthropic-sdk-go v1.22.0
 	github.com/modelcontextprotocol/go-sdk v1.3.0
 	github.com/openai/openai-go v0.1.0-beta.10
 	github.com/robfig/cron/v3 v3.0.1

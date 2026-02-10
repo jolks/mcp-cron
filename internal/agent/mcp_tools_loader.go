@@ -11,12 +11,11 @@ import (
 
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
-	"github.com/openai/openai-go"
 )
 
-type toolCaller func(context.Context, openai.ChatCompletionMessageToolCall) (string, error)
+type toolCaller func(context.Context, ToolCall) (string, error)
 
-func buildToolsFromConfig(sysCfg *config.Config) ([]openai.ChatCompletionToolParam, toolCaller, error) {
+func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, error) {
 	// Parse the config file
 	// TODO: support Env
 	var cfg struct {
@@ -35,7 +34,7 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]openai.ChatCompletionToolPar
 	}
 
 	// Create a go-sdk client per server and collect its tools
-	var tools []openai.ChatCompletionToolParam
+	var tools []ToolDefinition
 	sessionBySrv := map[string]*mcp.ClientSession{}
 	tool2srv := map[string]string{} // toolName -> serverName
 
@@ -81,8 +80,8 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]openai.ChatCompletionToolPar
 				continue
 			}
 
-			// WORKAROUND: Fix empty parameter schemas to avoid OpenAI API errors
-			// Check if this is an empty schema (no properties)
+			// WORKAROUND: Fix empty parameter schemas to avoid OpenAI API errors.
+			// Check if this is an empty schema (no properties).
 			if params["type"] == "object" && (params["properties"] == nil || len(params["properties"].(map[string]interface{})) == 0) {
 				// Add a dummy property to satisfy OpenAI API requirements
 				props := map[string]interface{}{
@@ -96,43 +95,40 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]openai.ChatCompletionToolPar
 				log.Printf("Added dummy parameter to empty schema for tool %s\n", tl.Name)
 			}
 
-			tools = append(tools, openai.ChatCompletionToolParam{
-				Function: openai.FunctionDefinitionParam{
-					Name:        tl.Name,
-					Description: openai.String(tl.Description),
-					Parameters:  params,
-				},
+			tools = append(tools, ToolDefinition{
+				Name:        tl.Name,
+				Description: tl.Description,
+				Parameters:  params,
 			})
 			tool2srv[tl.Name] = name
 		}
 	}
-	// log.Printf("Found tools: %v\n", tools)
 	// No tools. Fallback to LLM
 	if len(tools) == 0 {
 		return nil, nil, nil
 	}
 	// Dispatcher to route model's tool calls to the correct MCP server
-	dispatcher := func(ctx context.Context, call openai.ChatCompletionMessageToolCall) (string, error) {
+	dispatcher := func(ctx context.Context, call ToolCall) (string, error) {
 		// Parse arguments JSON string into a map
 		var args map[string]interface{}
-		if err := json.Unmarshal([]byte(call.Function.Arguments), &args); err != nil {
+		if err := json.Unmarshal([]byte(call.Arguments), &args); err != nil {
 			return "", fmt.Errorf("failed to unmarshal arguments: %w", err)
 		}
 
 		// Check if tool name exists in mapping
-		serverName, ok := tool2srv[call.Function.Name]
+		serverName, ok := tool2srv[call.Name]
 		if !ok {
-			return "", fmt.Errorf("unknown tool: %s", call.Function.Name)
+			return "", fmt.Errorf("unknown tool: %s", call.Name)
 		}
 
 		// Check if session exists in mapping
 		session, ok := sessionBySrv[serverName]
 		if !ok {
-			return "", fmt.Errorf("server not found for tool: %s", call.Function.Name)
+			return "", fmt.Errorf("server not found for tool: %s", call.Name)
 		}
 
 		res, err := session.CallTool(ctx, &mcp.CallToolParams{
-			Name:      call.Function.Name,
+			Name:      call.Name,
 			Arguments: args,
 		})
 		if err != nil {

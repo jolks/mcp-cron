@@ -4,15 +4,39 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
 )
 
-// RunTask executes an AI task using the OpenAI API
+// newChatProvider builds the appropriate ChatProvider based on cfg.AI.Provider.
+func newChatProvider(cfg *config.Config) (ChatProvider, error) {
+	provider := strings.ToLower(cfg.AI.Provider)
+	switch provider {
+	case "anthropic":
+		apiKey := cfg.AI.AnthropicAPIKey
+		if apiKey == "" {
+			apiKey = cfg.AI.APIKey
+		}
+		if apiKey == "" {
+			return nil, fmt.Errorf("Anthropic API key is not set in configuration")
+		}
+		return NewAnthropicProvider(apiKey), nil
+	default: // "openai" or empty
+		apiKey := cfg.AI.OpenAIAPIKey
+		if apiKey == "" {
+			apiKey = cfg.AI.APIKey
+		}
+		if apiKey == "" {
+			return nil, fmt.Errorf("OpenAI API key is not set in configuration")
+		}
+		return NewOpenAIProvider(apiKey, cfg.AI.BaseURL), nil
+	}
+}
+
+// RunTask executes an AI task using the configured LLM provider.
 func RunTask(ctx context.Context, t *model.Task, cfg *config.Config) (string, error) {
 	logger := logging.GetDefaultLogger().WithField("task_id", t.ID)
 	logger.Infof("Running AI task: %s", t.Name)
@@ -24,33 +48,27 @@ func RunTask(ctx context.Context, t *model.Task, cfg *config.Config) (string, er
 		return "", err
 	}
 
-	// Check for API key
-	apiKey := cfg.AI.OpenAIAPIKey
-	if apiKey == "" {
-		logger.Errorf("OpenAI API key is not set in configuration")
-		return "", fmt.Errorf("OpenAI API key is not set in configuration")
+	// Build the provider
+	provider, err := newChatProvider(cfg)
+	if err != nil {
+		logger.Errorf("Failed to create chat provider: %v", err)
+		return "", err
 	}
 
-	// Create OpenAI client
-	client := openai.NewClient(option.WithAPIKey(apiKey))
-	msgs := []openai.ChatCompletionMessageParamUnion{
-		openai.UserMessage(t.Prompt),
+	msgs := []Message{
+		{Role: "user", Content: t.Prompt},
 	}
 
 	// Fallback to LLM if no tools
 	if len(tools) == 0 {
 		logger.Infof("No tools available, using basic chat completion")
-		resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-			Model:    cfg.AI.Model,
-			Messages: msgs,
-		})
+		resp, err := provider.CreateCompletion(ctx, cfg.AI.Model, msgs, nil)
 		if err != nil {
 			logger.Errorf("Chat completion failed: %v", err)
 			return "", err
 		}
-		result := resp.Choices[0].Message.Content
 		logger.Infof("AI task completed successfully")
-		return result, nil
+		return resp.Content, nil
 	}
 
 	// Tool-enabled loop
@@ -59,37 +77,35 @@ func RunTask(ctx context.Context, t *model.Task, cfg *config.Config) (string, er
 
 	for i := 0; i < maxIterations; i++ {
 		logger.Debugf("AI task iteration %d", i+1)
-		resp, err := client.Chat.Completions.New(ctx, openai.ChatCompletionNewParams{
-			Model:    cfg.AI.Model,
-			Messages: msgs,
-			Tools:    tools,
-		})
+		resp, err := provider.CreateCompletion(ctx, cfg.AI.Model, msgs, tools)
 		if err != nil {
 			logger.Errorf("Chat completion failed on iteration %d: %v", i+1, err)
 			return "", err
 		}
 
-		m := resp.Choices[0].Message
-
 		// If no tool calls, return the content
-		if len(m.ToolCalls) == 0 {
+		if len(resp.ToolCalls) == 0 {
 			logger.Infof("AI task completed successfully with %d iterations", i+1)
-			return m.Content, nil
+			return resp.Content, nil
 		}
 
-		// Add the assistant message with tool calls to the conversation first
-		msgs = append(msgs, m.ToParam())
+		// Add the assistant message with tool calls to the conversation
+		msgs = append(msgs, *resp)
 
 		// Process tool calls
-		logger.Debugf("Processing %d tool calls in iteration %d", len(m.ToolCalls), i+1)
-		for j, call := range m.ToolCalls {
-			logger.Debugf("Tool call %d: %s", j+1, call.Function.Name)
+		logger.Debugf("Processing %d tool calls in iteration %d", len(resp.ToolCalls), i+1)
+		for j, call := range resp.ToolCalls {
+			logger.Debugf("Tool call %d: %s", j+1, call.Name)
 			out, err := dispatcher(ctx, call)
 			if err != nil {
 				logger.Warnf("Tool call error: %v", err)
 				out = "ERROR: " + err.Error()
 			}
-			msgs = append(msgs, openai.ToolMessage(out, call.ID))
+			msgs = append(msgs, Message{
+				Role:       "tool",
+				Content:    out,
+				ToolCallID: call.ID,
+			})
 		}
 	}
 

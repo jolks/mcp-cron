@@ -42,8 +42,20 @@ func TestDefaultConfig(t *testing.T) {
 	}
 
 	// Test AI defaults
+	if cfg.AI.Provider != "openai" {
+		t.Errorf("Expected default provider to be 'openai', got '%s'", cfg.AI.Provider)
+	}
+	if cfg.AI.BaseURL != "" {
+		t.Errorf("Expected default base URL to be empty, got '%s'", cfg.AI.BaseURL)
+	}
+	if cfg.AI.APIKey != "" {
+		t.Errorf("Expected default API key to be empty, got '%s'", cfg.AI.APIKey)
+	}
 	if cfg.AI.OpenAIAPIKey != "" {
 		t.Errorf("Expected default OpenAI API key to be empty, got '%s'", cfg.AI.OpenAIAPIKey)
+	}
+	if cfg.AI.AnthropicAPIKey != "" {
+		t.Errorf("Expected default Anthropic API key to be empty, got '%s'", cfg.AI.AnthropicAPIKey)
 	}
 	if cfg.AI.EnableOpenAITests != false {
 		t.Errorf("Expected default EnableOpenAITests to be false, got %v", cfg.AI.EnableOpenAITests)
@@ -122,7 +134,11 @@ func TestFromEnv(t *testing.T) {
 		"MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT": os.Getenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT"),
 		"MCP_CRON_LOGGING_LEVEL":             os.Getenv("MCP_CRON_LOGGING_LEVEL"),
 		"MCP_CRON_LOGGING_FILE":              os.Getenv("MCP_CRON_LOGGING_FILE"),
+		"MCP_CRON_AI_PROVIDER":               os.Getenv("MCP_CRON_AI_PROVIDER"),
+		"MCP_CRON_AI_BASE_URL":               os.Getenv("MCP_CRON_AI_BASE_URL"),
+		"MCP_CRON_AI_API_KEY":                os.Getenv("MCP_CRON_AI_API_KEY"),
 		"OPENAI_API_KEY":                     os.Getenv("OPENAI_API_KEY"),
+		"ANTHROPIC_API_KEY":                  os.Getenv("ANTHROPIC_API_KEY"),
 		"MCP_CRON_ENABLE_OPENAI_TESTS":       os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS"),
 		"MCP_CRON_AI_MODEL":                  os.Getenv("MCP_CRON_AI_MODEL"),
 		"MCP_CRON_AI_MAX_TOOL_ITERATIONS":    os.Getenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS"),
@@ -154,7 +170,11 @@ func TestFromEnv(t *testing.T) {
 	os.Setenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT", "5m")
 	os.Setenv("MCP_CRON_LOGGING_LEVEL", "debug")
 	os.Setenv("MCP_CRON_LOGGING_FILE", "/tmp/test.log")
+	os.Setenv("MCP_CRON_AI_PROVIDER", "anthropic")
+	os.Setenv("MCP_CRON_AI_BASE_URL", "http://localhost:11434/v1")
+	os.Setenv("MCP_CRON_AI_API_KEY", "generic-key")
 	os.Setenv("OPENAI_API_KEY", "test-key")
+	os.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
 	os.Setenv("MCP_CRON_ENABLE_OPENAI_TESTS", "true")
 	os.Setenv("MCP_CRON_AI_MODEL", "gpt-4-turbo")
 	os.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "30")
@@ -189,8 +209,20 @@ func TestFromEnv(t *testing.T) {
 	if cfg.Logging.FilePath != "/tmp/test.log" {
 		t.Errorf("Expected log file path '/tmp/test.log', got '%s'", cfg.Logging.FilePath)
 	}
+	if cfg.AI.Provider != "anthropic" {
+		t.Errorf("Expected provider 'anthropic', got '%s'", cfg.AI.Provider)
+	}
+	if cfg.AI.BaseURL != "http://localhost:11434/v1" {
+		t.Errorf("Expected base URL 'http://localhost:11434/v1', got '%s'", cfg.AI.BaseURL)
+	}
+	if cfg.AI.APIKey != "generic-key" {
+		t.Errorf("Expected generic API key 'generic-key', got '%s'", cfg.AI.APIKey)
+	}
 	if cfg.AI.OpenAIAPIKey != "test-key" {
 		t.Errorf("Expected OpenAI API key 'test-key', got '%s'", cfg.AI.OpenAIAPIKey)
+	}
+	if cfg.AI.AnthropicAPIKey != "anthropic-key" {
+		t.Errorf("Expected Anthropic API key 'anthropic-key', got '%s'", cfg.AI.AnthropicAPIKey)
 	}
 	if !cfg.AI.EnableOpenAITests {
 		t.Errorf("Expected EnableOpenAITests true, got false")

@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 	"testing"
 	"time"
 
@@ -239,4 +240,142 @@ func TestRunTaskIntegration(t *testing.T) {
 	}
 
 	t.Logf("OpenAI API response: %s", output)
+}
+
+func TestRunTaskIntegrationAnthropic(t *testing.T) {
+	// Skip by default to avoid making actual API calls during routine testing
+	if os.Getenv("MCP_CRON_ENABLE_ANTHROPIC_TESTS") != "true" {
+		t.Skip("Skipping Anthropic integration test. Set MCP_CRON_ENABLE_ANTHROPIC_TESTS=true to run.")
+	}
+
+	// Create a default config for testing
+	cfg := config.DefaultConfig()
+	cfg.AI.Provider = "anthropic"
+	cfg.AI.Model = "claude-sonnet-4-5-20250929"
+
+	// Set the API key from environment for the test
+	cfg.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
+	if cfg.AI.AnthropicAPIKey == "" {
+		t.Skip("ANTHROPIC_API_KEY environment variable not set")
+	}
+
+	// Create a simple task
+	task := &model.Task{
+		ID:     "integration-test-anthropic",
+		Prompt: "What is 2+2? Answer with just the number",
+	}
+
+	// Run the task
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	output, err := RunTask(ctx, task, cfg)
+	if err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	// Verify we got some kind of response
+	if output == "" {
+		t.Error("Expected non-empty output from Anthropic API")
+	}
+
+	t.Logf("Anthropic API response: %s", output)
+}
+
+func TestRunTaskIntegrationListToolsOpenAI(t *testing.T) {
+	if os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS") != "true" {
+		t.Skip("Skipping OpenAI list-tools integration test. Set MCP_CRON_ENABLE_OPENAI_TESTS=true to run.")
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.AI.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
+	if cfg.AI.OpenAIAPIKey == "" {
+		t.Skip("OPENAI_API_KEY environment variable not set")
+	}
+
+	// Verify MCP tools are actually available
+	tools, _, err := buildToolsFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("Failed to build tools: %v", err)
+	}
+	if len(tools) == 0 {
+		t.Skip("No MCP tools available — cannot test tool visibility")
+	}
+	t.Logf("Loaded %d MCP tools", len(tools))
+
+	task := &model.Task{
+		ID:     "integration-test-openai-list-tools",
+		Prompt: "List all the tools you have available. Just list their names, one per line. Do not call any tool.",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	output, err := RunTask(ctx, task, cfg)
+	if err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	if output == "" {
+		t.Fatal("Expected non-empty output")
+	}
+
+	// Verify the AI mentions at least some known mcp-cron tools
+	for _, name := range []string{"list_tasks", "add_task", "remove_task"} {
+		if !strings.Contains(output, name) {
+			t.Errorf("Expected output to mention tool %q, but it didn't", name)
+		}
+	}
+
+	t.Logf("OpenAI listed tools:\n%s", output)
+}
+
+func TestRunTaskIntegrationListToolsAnthropic(t *testing.T) {
+	if os.Getenv("MCP_CRON_ENABLE_ANTHROPIC_TESTS") != "true" {
+		t.Skip("Skipping Anthropic list-tools integration test. Set MCP_CRON_ENABLE_ANTHROPIC_TESTS=true to run.")
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.AI.Provider = "anthropic"
+	cfg.AI.Model = "claude-sonnet-4-5-20250929"
+	cfg.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
+	if cfg.AI.AnthropicAPIKey == "" {
+		t.Skip("ANTHROPIC_API_KEY environment variable not set")
+	}
+
+	// Verify MCP tools are actually available
+	tools, _, err := buildToolsFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("Failed to build tools: %v", err)
+	}
+	if len(tools) == 0 {
+		t.Skip("No MCP tools available — cannot test tool visibility")
+	}
+	t.Logf("Loaded %d MCP tools", len(tools))
+
+	task := &model.Task{
+		ID:     "integration-test-anthropic-list-tools",
+		Prompt: "List all the tools you have available. Just list their names, one per line. Do not call any tool.",
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	output, err := RunTask(ctx, task, cfg)
+	if err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	if output == "" {
+		t.Fatal("Expected non-empty output")
+	}
+
+	// Verify the AI mentions at least some known mcp-cron tools
+	for _, name := range []string{"list_tasks", "add_task", "remove_task"} {
+		if !strings.Contains(output, name) {
+			t.Errorf("Expected output to mention tool %q, but it didn't", name)
+		}
+	}
+
+	t.Logf("Anthropic listed tools:\n%s", output)
 }

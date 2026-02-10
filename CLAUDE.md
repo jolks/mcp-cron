@@ -16,7 +16,7 @@ golangci-lint run             # lint (CI uses vendor mode: --modules-download-mo
 ```
 cmd/mcp-cron/          # Entry point — flag parsing, wiring, graceful shutdown
 internal/
-  agent/               # AI task executor (OpenAI chat completions + MCP tool loop)
+  agent/               # AI task executor (multi-provider: OpenAI, Anthropic, OpenAI-compatible) + MCP tool loop
   command/             # Shell command executor (exec.CommandContext with timeout)
   config/              # Config structs, defaults, env var loading, validation
   errors/              # Typed errors: NotFound, AlreadyExists, InvalidInput, Internal
@@ -29,6 +29,7 @@ internal/
 
 ## Key Conventions
 
+- **Vendor directory**: `vendor/` is gitignored — do NOT commit it. Dependencies are tracked via `go.mod` + `go.sum`; run `go mod vendor` locally to recreate.
 - **License header**: Every Go file starts with `// SPDX-License-Identifier: AGPL-3.0-only`
 - **Handler signature**: `func (s *MCPServer) handle<Name>(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error)`
 - **Task types**: `shell_command` (runs a command) and `AI` (runs an LLM prompt)
@@ -44,6 +45,7 @@ list_tasks, get_task, add_task, add_ai_task, update_task, remove_task, enable_ta
 
 - `github.com/modelcontextprotocol/go-sdk` — Official MCP Go SDK
 - `github.com/openai/openai-go` — OpenAI API client (for AI tasks)
+- `github.com/anthropics/anthropic-sdk-go` — Anthropic API client (for AI tasks)
 - `github.com/robfig/cron/v3` — Cron expression parsing and scheduling
 
 ## CI
