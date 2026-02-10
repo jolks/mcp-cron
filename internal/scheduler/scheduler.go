@@ -20,6 +20,7 @@ type Scheduler struct {
 	entryIDs     map[string]cron.EntryID
 	mu           sync.RWMutex
 	taskExecutor model.Executor
+	taskStore    model.TaskStore
 	config       *config.SchedulerConfig
 }
 
@@ -73,7 +74,14 @@ func (s *Scheduler) AddTask(task *model.Task) error {
 		return errors.AlreadyExists("task", task.ID)
 	}
 
-	// Store the task
+	// Persist to store first
+	if s.taskStore != nil {
+		if err := s.taskStore.SaveTask(task); err != nil {
+			return fmt.Errorf("persist task: %w", err)
+		}
+	}
+
+	// Store the task in memory
 	s.tasks[task.ID] = task
 
 	if task.Enabled {
@@ -96,6 +104,13 @@ func (s *Scheduler) RemoveTask(taskID string) error {
 	_, exists := s.tasks[taskID]
 	if !exists {
 		return errors.NotFound("task", taskID)
+	}
+
+	// Remove from store
+	if s.taskStore != nil {
+		if err := s.taskStore.DeleteTask(taskID); err != nil {
+			return fmt.Errorf("delete task from store: %w", err)
+		}
 	}
 
 	// Remove the task from cron if it's scheduled
@@ -126,6 +141,14 @@ func (s *Scheduler) EnableTask(taskID string) error {
 
 	task.Enabled = true
 	task.UpdatedAt = time.Now()
+
+	// Persist to store
+	if s.taskStore != nil {
+		if err := s.taskStore.UpdateTask(task); err != nil {
+			task.Enabled = false // rollback
+			return fmt.Errorf("persist task enable: %w", err)
+		}
+	}
 
 	err := s.scheduleTask(task)
 	if err != nil {
@@ -160,6 +183,14 @@ func (s *Scheduler) DisableTask(taskID string) error {
 	task.Enabled = false
 	task.Status = model.StatusDisabled
 	task.UpdatedAt = time.Now()
+
+	// Persist to store
+	if s.taskStore != nil {
+		if err := s.taskStore.UpdateTask(task); err != nil {
+			return fmt.Errorf("persist task disable: %w", err)
+		}
+	}
+
 	return nil
 }
 
@@ -211,6 +242,13 @@ func (s *Scheduler) UpdateTask(task *model.Task) error {
 	task.UpdatedAt = time.Now()
 	s.tasks[task.ID] = task
 
+	// Persist to store
+	if s.taskStore != nil {
+		if err := s.taskStore.UpdateTask(task); err != nil {
+			return fmt.Errorf("persist task update: %w", err)
+		}
+	}
+
 	// If enabled, schedule it
 	if task.Enabled {
 		return s.scheduleTask(task)
@@ -224,6 +262,44 @@ func (s *Scheduler) SetTaskExecutor(executor model.Executor) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.taskExecutor = executor
+}
+
+// SetTaskStore sets the store to be used for task persistence
+func (s *Scheduler) SetTaskStore(store model.TaskStore) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.taskStore = store
+}
+
+// LoadTasks restores persisted tasks from the store into the scheduler.
+// Must be called after SetTaskExecutor so that enabled tasks can be scheduled.
+func (s *Scheduler) LoadTasks() error {
+	if s.taskStore == nil {
+		return nil
+	}
+
+	tasks, err := s.taskStore.LoadTasks()
+	if err != nil {
+		return fmt.Errorf("load tasks from store: %w", err)
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	for _, task := range tasks {
+		if _, exists := s.tasks[task.ID]; exists {
+			continue // skip duplicates
+		}
+		s.tasks[task.ID] = task
+		if task.Enabled {
+			if err := s.scheduleTask(task); err != nil {
+				task.Status = model.StatusFailed
+				fmt.Printf("Failed to schedule persisted task %s: %v\n", task.ID, err)
+			}
+		}
+	}
+
+	return nil
 }
 
 // NewTask creates a new task with default values

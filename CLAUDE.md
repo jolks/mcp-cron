@@ -22,9 +22,9 @@ internal/
   errors/              # Typed errors: NotFound, AlreadyExists, InvalidInput, Internal
   logging/             # Leveled logger (Debug/Info/Warn/Error/Fatal), file + stdout
   model/               # Core types: Task, Result, TaskType, TaskStatus, Executor, ResultStore interfaces
-  scheduler/           # Cron scheduling via robfig/cron, in-memory task storage
+  scheduler/           # Cron scheduling via robfig/cron, in-memory task storage with SQLite write-through
   server/              # MCP server, tool registration, HTTP/stdio transport, handlers
-  store/               # SQLite result store (persistent result history, schema migrations)
+  store/               # SQLite store (persistent task definitions + result history, schema migrations)
   utils/               # JSON unmarshal helper
 ```
 
@@ -35,7 +35,7 @@ internal/
 - **Handler signature**: `func (s *MCPServer) handle<Name>(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error)`
 - **Task types**: `shell_command` (runs a command) and `AI` (runs an LLM prompt)
 - **Task statuses**: pending, running, completed, failed, disabled
-- **Storage**: In-memory maps for task metadata; SQLite (`modernc.org/sqlite`, pure Go) for persistent result history
+- **Storage**: In-memory maps with SQLite write-through for task definitions; SQLite for persistent result history (`modernc.org/sqlite`, pure Go)
 - **Transport**: SSE (HTTP, default) or stdio (for CLI/Docker integration)
 
 ## MCP Tools Exposed

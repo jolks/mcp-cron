@@ -4,11 +4,13 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"path/filepath"
 	"testing"
 	"time"
 
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/model"
+	"github.com/jolks/mcp-cron/internal/store"
 )
 
 // MockTaskExecutor implements the model.Executor interface for testing
@@ -566,5 +568,266 @@ func TestMissingTaskExecutor(t *testing.T) {
 	if task.Status != model.StatusFailed {
 		t.Errorf("Expected task status to be %s after error, got %s",
 			model.StatusFailed, task.Status)
+	}
+}
+
+// --- Task persistence round-trip tests ---
+
+func newTestStoreForScheduler(t *testing.T) *store.SQLiteStore {
+	t.Helper()
+	dbPath := filepath.Join(t.TempDir(), "test.db")
+	s, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore: %v", err)
+	}
+	t.Cleanup(func() { s.Close() })
+	return s
+}
+
+func TestPersistenceRoundTrip(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	cfg := createTestConfig()
+
+	// Create first scheduler, add tasks
+	s1 := NewScheduler(cfg)
+	s1.SetTaskStore(taskStore)
+	s1.SetTaskExecutor(&MockTaskExecutor{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	s1.Start(ctx)
+
+	now := time.Now()
+	shellTask := &model.Task{
+		ID:          "persist-shell",
+		Name:        "Shell Task",
+		Description: "persisted shell task",
+		Type:        model.TypeShellCommand.String(),
+		Command:     "echo persisted",
+		Schedule:    "*/5 * * * *",
+		Enabled:     true,
+		Status:      model.StatusPending,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	aiTask := &model.Task{
+		ID:          "persist-ai",
+		Name:        "AI Task",
+		Type:        model.TypeAI.String(),
+		Prompt:      "Summarize the news",
+		Schedule:    "0 9 * * *",
+		Enabled:     false,
+		Status:      model.StatusPending,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if err := s1.AddTask(shellTask); err != nil {
+		t.Fatalf("AddTask shell: %v", err)
+	}
+	if err := s1.AddTask(aiTask); err != nil {
+		t.Fatalf("AddTask ai: %v", err)
+	}
+
+	// Stop first scheduler
+	cancel()
+	s1.Stop()
+
+	// Create second scheduler with same store, load tasks
+	s2 := NewScheduler(cfg)
+	s2.SetTaskStore(taskStore)
+	s2.SetTaskExecutor(&MockTaskExecutor{})
+
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	s2.Start(ctx2)
+
+	if err := s2.LoadTasks(); err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+
+	// Verify tasks were restored
+	tasks := s2.ListTasks()
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks after reload, got %d", len(tasks))
+	}
+
+	got, err := s2.GetTask("persist-shell")
+	if err != nil {
+		t.Fatalf("GetTask persist-shell: %v", err)
+	}
+	if got.Name != "Shell Task" {
+		t.Errorf("Name = %q, want %q", got.Name, "Shell Task")
+	}
+	if got.Command != "echo persisted" {
+		t.Errorf("Command = %q, want %q", got.Command, "echo persisted")
+	}
+	if !got.Enabled {
+		t.Error("shell task should be enabled after reload")
+	}
+
+	got, err = s2.GetTask("persist-ai")
+	if err != nil {
+		t.Fatalf("GetTask persist-ai: %v", err)
+	}
+	if got.Prompt != "Summarize the news" {
+		t.Errorf("Prompt = %q, want %q", got.Prompt, "Summarize the news")
+	}
+	if got.Enabled {
+		t.Error("AI task should be disabled after reload")
+	}
+
+	// Verify enabled task is scheduled
+	s2.mu.RLock()
+	_, shellScheduled := s2.entryIDs["persist-shell"]
+	_, aiScheduled := s2.entryIDs["persist-ai"]
+	s2.mu.RUnlock()
+
+	if !shellScheduled {
+		t.Error("enabled shell task should be scheduled after LoadTasks")
+	}
+	if aiScheduled {
+		t.Error("disabled AI task should not be scheduled after LoadTasks")
+	}
+}
+
+func TestPersistenceRemoveTask(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	cfg := createTestConfig()
+
+	s := NewScheduler(cfg)
+	s.SetTaskStore(taskStore)
+
+	now := time.Now()
+	task := &model.Task{
+		ID:        "to-remove",
+		Name:      "Remove Me",
+		Type:      model.TypeShellCommand.String(),
+		Command:   "echo remove",
+		Schedule:  "* * * * *",
+		Enabled:   false,
+		Status:    model.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	if err := s.RemoveTask("to-remove"); err != nil {
+		t.Fatalf("RemoveTask: %v", err)
+	}
+
+	// Verify removed from DB too
+	tasks, err := taskStore.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("expected 0 tasks in DB after remove, got %d", len(tasks))
+	}
+}
+
+func TestPersistenceUpdateTask(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	cfg := createTestConfig()
+
+	s := NewScheduler(cfg)
+	s.SetTaskStore(taskStore)
+
+	now := time.Now()
+	task := &model.Task{
+		ID:        "to-update",
+		Name:      "Original",
+		Type:      model.TypeShellCommand.String(),
+		Command:   "echo old",
+		Schedule:  "* * * * *",
+		Enabled:   false,
+		Status:    model.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	updated := &model.Task{
+		ID:       "to-update",
+		Name:     "Updated",
+		Type:     model.TypeShellCommand.String(),
+		Command:  "echo new",
+		Schedule: "*/10 * * * *",
+		Enabled:  false,
+		Status:   model.StatusPending,
+	}
+
+	if err := s.UpdateTask(updated); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	// Verify persisted to DB
+	tasks, err := taskStore.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].Name != "Updated" {
+		t.Errorf("Name = %q, want %q", tasks[0].Name, "Updated")
+	}
+	if tasks[0].Command != "echo new" {
+		t.Errorf("Command = %q, want %q", tasks[0].Command, "echo new")
+	}
+}
+
+func TestPersistenceEnableDisable(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	cfg := createTestConfig()
+
+	s := NewScheduler(cfg)
+	s.SetTaskStore(taskStore)
+	s.SetTaskExecutor(&MockTaskExecutor{})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Start(ctx)
+
+	now := time.Now()
+	task := &model.Task{
+		ID:        "toggle-task",
+		Name:      "Toggle",
+		Type:      model.TypeShellCommand.String(),
+		Command:   "echo toggle",
+		Schedule:  "*/5 * * * *",
+		Enabled:   false,
+		Status:    model.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	// Enable — should persist
+	if err := s.EnableTask("toggle-task"); err != nil {
+		t.Fatalf("EnableTask: %v", err)
+	}
+
+	tasks, _ := taskStore.LoadTasks()
+	if !tasks[0].Enabled {
+		t.Error("expected enabled=true in DB after EnableTask")
+	}
+
+	// Disable — should persist
+	if err := s.DisableTask("toggle-task"); err != nil {
+		t.Fatalf("DisableTask: %v", err)
+	}
+
+	tasks, _ = taskStore.LoadTasks()
+	if tasks[0].Enabled {
+		t.Error("expected enabled=false in DB after DisableTask")
 	}
 }

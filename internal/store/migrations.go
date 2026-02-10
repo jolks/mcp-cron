@@ -35,6 +35,26 @@ var migrations = []migration{
 			return err
 		},
 	},
+	{
+		version: 2,
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`
+				CREATE TABLE tasks (
+					id          TEXT PRIMARY KEY,
+					name        TEXT NOT NULL,
+					description TEXT DEFAULT '',
+					type        TEXT NOT NULL,
+					command     TEXT DEFAULT '',
+					prompt      TEXT DEFAULT '',
+					schedule    TEXT NOT NULL,
+					enabled     INTEGER DEFAULT 1,
+					created_at  TEXT NOT NULL,
+					updated_at  TEXT NOT NULL
+				);
+			`)
+			return err
+		},
+	},
 }
 
 // runMigrations ensures the schema_version table exists and runs any pending migrations.

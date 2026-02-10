@@ -145,6 +145,7 @@ func createApp(cfg *config.Config) (*Application, error) {
 	cmdExec := command.NewCommandExecutor(resultStore)
 	agentExec := agent.NewAgentExecutor(cfg, resultStore)
 	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	sched.SetTaskStore(resultStore)
 
 	// Create the MCP server
 	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec, resultStore)
@@ -174,6 +175,13 @@ func (a *Application) Start(ctx context.Context) error {
 	// Start the scheduler
 	a.scheduler.Start(ctx)
 	a.logger.Infof("Task scheduler started")
+
+	// Restore persisted tasks from the database
+	if err := a.scheduler.LoadTasks(); err != nil {
+		a.logger.Errorf("Failed to load persisted tasks: %v", err)
+	} else {
+		a.logger.Infof("Persisted tasks loaded")
+	}
 
 	// Start the MCP server
 	if err := a.server.Start(ctx); err != nil {

@@ -82,6 +82,14 @@ type ResultProvider interface {
 	GetTaskResult(taskID string) (*Result, bool)
 }
 
+// TaskStore defines an interface for persisting and retrieving task definitions
+type TaskStore interface {
+	SaveTask(task *Task) error
+	UpdateTask(task *Task) error
+	DeleteTask(taskID string) error
+	LoadTasks() ([]*Task, error)
+}
+
 // ResultStore defines an interface for persisting and retrieving task execution results
 type ResultStore interface {
 	SaveResult(result *Result) error

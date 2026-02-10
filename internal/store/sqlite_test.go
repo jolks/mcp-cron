@@ -208,6 +208,237 @@ func TestMigrationIdempotent(t *testing.T) {
 	s2.Close()
 }
 
+// --- Task persistence tests ---
+
+func TestSaveAndLoadTask(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	task := &model.Task{
+		ID:          "task-1",
+		Name:        "Test Task",
+		Description: "A test task",
+		Type:        "shell_command",
+		Command:     "echo hello",
+		Schedule:    "*/5 * * * *",
+		Enabled:     true,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	if err := s.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	tasks, err := s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+
+	got := tasks[0]
+	if got.ID != "task-1" {
+		t.Errorf("ID = %q, want %q", got.ID, "task-1")
+	}
+	if got.Name != "Test Task" {
+		t.Errorf("Name = %q, want %q", got.Name, "Test Task")
+	}
+	if got.Description != "A test task" {
+		t.Errorf("Description = %q, want %q", got.Description, "A test task")
+	}
+	if got.Type != "shell_command" {
+		t.Errorf("Type = %q, want %q", got.Type, "shell_command")
+	}
+	if got.Command != "echo hello" {
+		t.Errorf("Command = %q, want %q", got.Command, "echo hello")
+	}
+	if got.Schedule != "*/5 * * * *" {
+		t.Errorf("Schedule = %q, want %q", got.Schedule, "*/5 * * * *")
+	}
+	if !got.Enabled {
+		t.Error("Enabled = false, want true")
+	}
+	if got.Status != model.StatusPending {
+		t.Errorf("Status = %q, want %q", got.Status, model.StatusPending)
+	}
+}
+
+func TestSaveAndLoadAITask(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	task := &model.Task{
+		ID:        "ai-task-1",
+		Name:      "AI Task",
+		Type:      "AI",
+		Prompt:    "Summarize the news",
+		Schedule:  "0 9 * * *",
+		Enabled:   true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	tasks, err := s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+
+	got := tasks[0]
+	if got.Prompt != "Summarize the news" {
+		t.Errorf("Prompt = %q, want %q", got.Prompt, "Summarize the news")
+	}
+	if got.Type != "AI" {
+		t.Errorf("Type = %q, want %q", got.Type, "AI")
+	}
+}
+
+func TestUpdateTaskStore(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	task := &model.Task{
+		ID:        "task-upd",
+		Name:      "Original",
+		Type:      "shell_command",
+		Command:   "echo old",
+		Schedule:  "* * * * *",
+		Enabled:   true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	// Update fields
+	task.Name = "Updated"
+	task.Command = "echo new"
+	task.Enabled = false
+	task.UpdatedAt = now.Add(time.Minute)
+
+	if err := s.UpdateTask(task); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	tasks, err := s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+
+	got := tasks[0]
+	if got.Name != "Updated" {
+		t.Errorf("Name = %q, want %q", got.Name, "Updated")
+	}
+	if got.Command != "echo new" {
+		t.Errorf("Command = %q, want %q", got.Command, "echo new")
+	}
+	if got.Enabled {
+		t.Error("Enabled = true, want false")
+	}
+	if got.Status != model.StatusDisabled {
+		t.Errorf("Status = %q, want %q", got.Status, model.StatusDisabled)
+	}
+}
+
+func TestUpdateTaskNotFound(t *testing.T) {
+	s := newTestStore(t)
+
+	task := &model.Task{
+		ID:        "nonexistent",
+		Name:      "Ghost",
+		Type:      "shell_command",
+		Schedule:  "* * * * *",
+		UpdatedAt: time.Now(),
+	}
+
+	err := s.UpdateTask(task)
+	if err == nil {
+		t.Error("expected error updating nonexistent task, got nil")
+	}
+}
+
+func TestDeleteTaskStore(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	task := &model.Task{
+		ID:        "task-del",
+		Name:      "To Delete",
+		Type:      "shell_command",
+		Command:   "echo bye",
+		Schedule:  "* * * * *",
+		Enabled:   true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	if err := s.DeleteTask("task-del"); err != nil {
+		t.Fatalf("DeleteTask: %v", err)
+	}
+
+	tasks, err := s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 0 {
+		t.Fatalf("expected 0 tasks after delete, got %d", len(tasks))
+	}
+}
+
+func TestLoadTasksEmpty(t *testing.T) {
+	s := newTestStore(t)
+
+	tasks, err := s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if tasks != nil {
+		t.Fatalf("expected nil tasks for empty table, got %d", len(tasks))
+	}
+}
+
+func TestSaveDuplicateTask(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	task := &model.Task{
+		ID:        "dup-task",
+		Name:      "Dup",
+		Type:      "shell_command",
+		Command:   "echo dup",
+		Schedule:  "* * * * *",
+		Enabled:   true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.SaveTask(task); err != nil {
+		t.Fatalf("first SaveTask: %v", err)
+	}
+
+	err := s.SaveTask(task)
+	if err == nil {
+		t.Error("expected error saving duplicate task, got nil")
+	}
+}
+
 func TestClosePreventsFurtherOps(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "close.db")
 	s, err := NewSQLiteStore(dbPath)

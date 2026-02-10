@@ -8,6 +8,7 @@ Model Context Protocol (MCP) server for scheduling and managing tasks through a 
 - AI can have access to MCP servers 
 - [Manage tasks](#available-mcp-tools) via MCP protocol
 - Task execution with command output capture
+- Task persistence across restarts (SQLite)
 
 ## Installation
 
@@ -219,7 +220,7 @@ mcp-cron/
 │   ├── model/           # Data models and types
 │   ├── scheduler/       # Task scheduling
 │   ├── server/          # MCP server implementation
-│   ├── store/           # SQLite result store (persistent result history)
+│   ├── store/           # SQLite store (persistent task definitions + result history)
 │   └── utils/           # Miscellanous utilities
 ├── scripts/             # Utility scripts
 ├── go.mod               # Go modules definition
