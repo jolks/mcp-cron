@@ -322,6 +322,14 @@ func (s *Scheduler) scheduleTask(task *model.Task) error {
 
 	// Create the job function that will execute when scheduled
 	jobFunc := func() {
+		// Check if the task still exists (may have been removed between dispatch and execution)
+		s.mu.RLock()
+		if _, exists := s.tasks[task.ID]; !exists {
+			s.mu.RUnlock()
+			return
+		}
+		s.mu.RUnlock()
+
 		task.LastRun = time.Now()
 		task.Status = model.StatusRunning
 

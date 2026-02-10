@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -568,6 +569,79 @@ func TestMissingTaskExecutor(t *testing.T) {
 	if task.Status != model.StatusFailed {
 		t.Errorf("Expected task status to be %s after error, got %s",
 			model.StatusFailed, task.Status)
+	}
+}
+
+// TestRemoveTaskStopsExecution verifies that after removing a task, the
+// executor is no longer called even if the cron job was in-flight.
+func TestRemoveTaskStopsExecution(t *testing.T) {
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	var mu sync.Mutex
+	executionCount := 0
+
+	mockExecutor := &MockTaskExecutor{
+		ExecuteFunc: func(ctx context.Context, task *model.Task, timeout time.Duration) error {
+			mu.Lock()
+			executionCount++
+			mu.Unlock()
+			return nil
+		},
+	}
+	s.SetTaskExecutor(mockExecutor)
+	s.Start(ctx)
+	defer func() {
+		if err := s.Stop(); err != nil {
+			t.Logf("Failed to stop scheduler: %v", err)
+		}
+	}()
+
+	task := &model.Task{
+		ID:       "remove-while-running",
+		Name:     "Remove While Running",
+		Schedule: "* * * * * *", // every second
+		Command:  "echo test",
+		Enabled:  true,
+		Status:   model.StatusPending,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	// Wait for at least one execution
+	time.Sleep(1500 * time.Millisecond)
+
+	mu.Lock()
+	if executionCount == 0 {
+		mu.Unlock()
+		t.Fatal("expected at least one execution before removal")
+	}
+	mu.Unlock()
+
+	// Remove the task
+	if err := s.RemoveTask("remove-while-running"); err != nil {
+		t.Fatalf("RemoveTask: %v", err)
+	}
+
+	// Record count right after removal
+	mu.Lock()
+	countAfterRemoval := executionCount
+	mu.Unlock()
+
+	// Wait and verify no more executions happen
+	time.Sleep(2 * time.Second)
+
+	mu.Lock()
+	countAfterWait := executionCount
+	mu.Unlock()
+
+	if countAfterWait != countAfterRemoval {
+		t.Errorf("task executed %d more times after removal",
+			countAfterWait-countAfterRemoval)
 	}
 }
 
