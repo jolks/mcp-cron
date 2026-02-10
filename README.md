@@ -232,5 +232,5 @@ go test ./... -cover
 
 ## Acknowledgments
 
-- [ThinkInAIXYZ/go-mcp](https://github.com/ThinkInAIXYZ/go-mcp) - Go SDK for the Model Context Protocol
+- [modelcontextprotocol/go-sdk](https://github.com/modelcontextprotocol/go-sdk) - Official Go SDK for the Model Context Protocol
 - [robfig/cron](https://github.com/robfig/cron) - Cron library for Go 

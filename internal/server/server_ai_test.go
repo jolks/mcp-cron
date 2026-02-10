@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/jolks/mcp-cron/internal/agent"
 	"github.com/jolks/mcp-cron/internal/command"
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // createTestServer creates a minimal MCPServer for testing
@@ -61,12 +61,14 @@ func TestHandleAddAITask_AI(t *testing.T) {
 
 	// Create the request with the valid task
 	validRequestJSON, _ := json.Marshal(validTask)
-	validRequest := &protocol.CallToolRequest{
-		RawArguments: validRequestJSON,
+	validRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(validRequestJSON),
+		},
 	}
 
 	// Call the handler
-	result, err := server.handleAddAITask(context.Background(),validRequest)
+	result, err := server.handleAddAITask(context.Background(), validRequest)
 	if err != nil {
 		t.Fatalf("Valid request should not fail: %v", err)
 	}
@@ -82,12 +84,14 @@ func TestHandleAddAITask_AI(t *testing.T) {
 	}
 
 	invalidRequestJSON, _ := json.Marshal(invalidTask)
-	invalidRequest := &protocol.CallToolRequest{
-		RawArguments: invalidRequestJSON,
+	invalidRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(invalidRequestJSON),
+		},
 	}
 
 	// Call the handler
-	result, err = server.handleAddAITask(context.Background(),invalidRequest)
+	result, err = server.handleAddAITask(context.Background(), invalidRequest)
 	if err == nil {
 		t.Fatal("Invalid request should fail")
 	}
@@ -102,12 +106,14 @@ func TestHandleAddAITask_AI(t *testing.T) {
 	}
 
 	missingNameRequestJSON, _ := json.Marshal(missingNameTask)
-	missingNameRequest := &protocol.CallToolRequest{
-		RawArguments: missingNameRequestJSON,
+	missingNameRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(missingNameRequestJSON),
+		},
 	}
 
 	// Call the handler
-	result, err = server.handleAddAITask(context.Background(),missingNameRequest)
+	result, err = server.handleAddAITask(context.Background(), missingNameRequest)
 	if err == nil {
 		t.Fatal("Request with missing name should fail")
 	}
@@ -122,12 +128,14 @@ func TestHandleAddAITask_AI(t *testing.T) {
 	}
 
 	missingScheduleRequestJSON, _ := json.Marshal(missingScheduleTask)
-	missingScheduleRequest := &protocol.CallToolRequest{
-		RawArguments: missingScheduleRequestJSON,
+	missingScheduleRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(missingScheduleRequestJSON),
+		},
 	}
 
 	// Call the handler
-	result, err = server.handleAddAITask(context.Background(),missingScheduleRequest)
+	result, err = server.handleAddAITask(context.Background(), missingScheduleRequest)
 	if err == nil {
 		t.Fatal("Request with missing schedule should fail")
 	}
@@ -168,12 +176,14 @@ func TestUpdateAITask_AI(t *testing.T) {
 	}
 
 	updateRequestJSON, _ := json.Marshal(updateParams)
-	updateRequest := &protocol.CallToolRequest{
-		RawArguments: updateRequestJSON,
+	updateRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(updateRequestJSON),
+		},
 	}
 
 	// Call the handler
-	result, err := server.handleUpdateTask(context.Background(),updateRequest)
+	result, err := server.handleUpdateTask(context.Background(), updateRequest)
 	if err != nil {
 		t.Fatalf("Valid update should not fail: %v", err)
 	}
@@ -200,12 +210,14 @@ func TestUpdateAITask_AI(t *testing.T) {
 	}
 
 	multiUpdateRequestJSON, _ := json.Marshal(multiUpdateParams)
-	multiUpdateRequest := &protocol.CallToolRequest{
-		RawArguments: multiUpdateRequestJSON,
+	multiUpdateRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(multiUpdateRequestJSON),
+		},
 	}
 
 	// Call the handler
-	result, err = server.handleUpdateTask(context.Background(),multiUpdateRequest)
+	result, err = server.handleUpdateTask(context.Background(), multiUpdateRequest)
 	if err != nil {
 		t.Fatalf("Valid multi-update should not fail: %v", err)
 	}
@@ -265,12 +277,14 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 	}
 
 	updateRequestJSON, _ := json.Marshal(updateParams)
-	updateRequest := &protocol.CallToolRequest{
-		RawArguments: updateRequestJSON,
+	updateRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(updateRequestJSON),
+		},
 	}
 
 	// Call the handler
-	result, err := server.handleUpdateTask(context.Background(),updateRequest)
+	result, err := server.handleUpdateTask(context.Background(), updateRequest)
 	if err != nil {
 		t.Fatalf("Valid conversion should not fail: %v", err)
 	}
@@ -319,12 +333,14 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 	}
 
 	convertRequestJSON, _ := json.Marshal(convertParams)
-	convertRequest := &protocol.CallToolRequest{
-		RawArguments: convertRequestJSON,
+	convertRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(convertRequestJSON),
+		},
 	}
 
 	// Call the handler
-	result, err = server.handleUpdateTask(context.Background(),convertRequest)
+	result, err = server.handleUpdateTask(context.Background(), convertRequest)
 	if err != nil {
 		t.Fatalf("Valid conversion should not fail: %v", err)
 	}

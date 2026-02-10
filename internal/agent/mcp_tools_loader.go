@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"github.com/ThinkInAIXYZ/go-mcp/client"
-	"github.com/ThinkInAIXYZ/go-mcp/protocol"
-	"github.com/ThinkInAIXYZ/go-mcp/transport"
-	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/openai/openai-go"
 	"log"
 	"os"
+	"os/exec"
+
+	"github.com/jolks/mcp-cron/internal/config"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/openai/openai-go"
 )
 
 type toolCaller func(context.Context, openai.ChatCompletionMessageToolCall) (string, error)
@@ -34,45 +34,39 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]openai.ChatCompletionToolPar
 		return nil, nil, err
 	}
 
-	// Create a go-mcp client per server and collect its tools
+	// Create a go-sdk client per server and collect its tools
 	var tools []openai.ChatCompletionToolParam
-	cliBySrv := map[string]*client.Client{}
+	sessionBySrv := map[string]*mcp.ClientSession{}
 	tool2srv := map[string]string{} // toolName -> serverName
 
 	for name, spec := range cfg.MCP {
-		var tp transport.ClientTransport
+		var tp mcp.Transport
 		switch {
 		case spec.Command != "":
-			tp, err = transport.NewStdioClientTransport(spec.Command, spec.Args)
+			tp = &mcp.CommandTransport{Command: exec.Command(spec.Command, spec.Args...)}
 		case spec.URL != "":
-			tp, err = transport.NewSSEClientTransport(spec.URL)
+			tp = &mcp.SSEClientTransport{Endpoint: spec.URL}
 		default:
 			continue
 		}
+
+		cli := mcp.NewClient(&mcp.Implementation{Name: "mcp-cron", Version: "1.0.0"}, nil)
+		session, err := cli.Connect(context.Background(), tp, nil)
 		if err != nil {
-			// Log and continue. Don't abort discovery
-			log.Printf("Failed to create transport for server %s: %v\n", name, err)
+			log.Printf("Failed to connect to server %s: %v\n", name, err)
 			continue
 		}
+		sessionBySrv[name] = session
 
-		cli, err := client.NewClient(tp)
-		if err != nil {
-			log.Printf("Failed to create client for server %s: %v\n", name, err)
-			continue
-		}
-		cliBySrv[name] = cli
-
-		resp, err := cli.ListTools(context.Background())
+		resp, err := session.ListTools(context.Background(), nil)
 		if err != nil {
 			log.Printf("Failed to list tools for server %s: %v\n", name, err)
 			continue
 		}
 		for _, tl := range resp.Tools {
-			// Extract the raw JSON‑schema
+			// Extract the raw JSON-schema
 			var rawSchema []byte
-			if tl.RawInputSchema != nil {
-				rawSchema = tl.RawInputSchema
-			} else {
+			if tl.InputSchema != nil {
 				if b, err := json.Marshal(tl.InputSchema); err == nil {
 					rawSchema = b
 				} else {
@@ -131,14 +125,16 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]openai.ChatCompletionToolPar
 			return "", fmt.Errorf("unknown tool: %s", call.Function.Name)
 		}
 
-		// Check if server exists in client mapping
-		cli, ok := cliBySrv[serverName]
+		// Check if session exists in mapping
+		session, ok := sessionBySrv[serverName]
 		if !ok {
 			return "", fmt.Errorf("server not found for tool: %s", call.Function.Name)
 		}
 
-		req := protocol.NewCallToolRequest(call.Function.Name, args)
-		res, err := cli.CallTool(ctx, req)
+		res, err := session.CallTool(ctx, &mcp.CallToolParams{
+			Name:      call.Function.Name,
+			Arguments: args,
+		})
 		if err != nil {
 			return "", err
 		}

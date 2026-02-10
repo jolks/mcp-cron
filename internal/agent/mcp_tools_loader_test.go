@@ -102,6 +102,6 @@ func TestBuildToolsFromConfig(t *testing.T) {
 func TestEmptySchemaFix(t *testing.T) {
 	// We can't easily test this function directly, but we can verify
 	// that empty schemas are fixed when the dispatcher is created.
-	// This would require extensive mocking of the ThinkInAIXYZ/go-mcp library.
+	// This would require extensive mocking of the modelcontextprotocol/go-sdk library.
 	t.Skip("This test requires mocking the MCP server")
 }

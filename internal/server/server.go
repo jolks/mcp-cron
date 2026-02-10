@@ -5,15 +5,13 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
-	"github.com/ThinkInAIXYZ/go-mcp/protocol"
-	"github.com/ThinkInAIXYZ/go-mcp/server"
-	"github.com/ThinkInAIXYZ/go-mcp/transport"
 	"github.com/jolks/mcp-cron/internal/agent"
 	"github.com/jolks/mcp-cron/internal/command"
 	"github.com/jolks/mcp-cron/internal/config"
@@ -22,6 +20,7 @@ import (
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 	"github.com/jolks/mcp-cron/internal/utils"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // Make os.OpenFile mockable for testing
@@ -61,7 +60,9 @@ type MCPServer struct {
 	scheduler      *scheduler.Scheduler
 	cmdExecutor    *command.CommandExecutor
 	agentExecutor  *agent.AgentExecutor
-	server         *server.Server
+	server         *mcp.Server
+	httpServer     *http.Server
+	cancel         context.CancelFunc
 	address        string
 	port           int
 	stopCh         chan struct{}
@@ -88,6 +89,32 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		if err != nil {
 			return nil, fmt.Errorf("failed to create file logger: %w", err)
 		}
+	} else if cfg.Server.TransportMode == "stdio" {
+		// For stdio transport, all logging must go to a file to avoid
+		// corrupting the JSON-RPC stream on stdout
+		execPath, err := os.Executable()
+		if err != nil {
+			execPath = cfg.Server.Name
+		}
+		execDir := filepath.Dir(execPath)
+		logFilename := fmt.Sprintf("%s.log", cfg.Server.Name)
+		logPath := filepath.Join(execDir, logFilename)
+
+		logFile, err := osOpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
+		if err == nil {
+			log.SetOutput(logFile)
+			logger = logging.New(logging.Options{
+				Output: logFile,
+				Level:  parseLogLevel(cfg.Logging.Level),
+			})
+		} else {
+			// Fall back to stderr to avoid corrupting stdout
+			log.SetOutput(os.Stderr)
+			logger = logging.New(logging.Options{
+				Output: os.Stderr,
+				Level:  parseLogLevel(cfg.Logging.Level),
+			})
+		}
 	} else {
 		logger = logging.New(logging.Options{
 			Level: parseLogLevel(cfg.Logging.Level),
@@ -97,40 +124,28 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 	// Set as the default logger
 	logging.SetDefaultLogger(logger)
 
-	// Configure logger based on transport mode
-	if cfg.Server.TransportMode == "stdio" {
-		// For stdio transport, we need to be careful with logging
-		// as it could interfere with JSON-RPC messages
-		// Redirect logs to a file instead of stdout
-
-		// Get the executable path
-		execPath, err := os.Executable()
-		if err != nil {
-			logger.Errorf("Failed to get executable path: %v", err)
-			execPath = cfg.Server.Name
-		}
-
-		// Get the directory containing the executable
-		execDir := filepath.Dir(execPath)
-
-		// Set log path in the same directory as the executable
-		logFilename := fmt.Sprintf("%s.log", cfg.Server.Name)
-		logPath := filepath.Join(execDir, logFilename)
-
-		logFile, err := osOpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
-		if err == nil {
-			log.SetOutput(logFile)
-			logger.Infof("Logging to %s", logPath)
-		} else {
-			logger.Errorf("Failed to open log file at %s: %v", logPath, err)
-		}
+	// Validate transport mode
+	switch cfg.Server.TransportMode {
+	case "stdio":
+		logger.Infof("Using stdio transport")
+	case "sse":
+		logger.Infof("Using SSE transport on %s:%d", cfg.Server.Address, cfg.Server.Port)
+	default:
+		return nil, errors.InvalidInput(fmt.Sprintf("unsupported transport mode: %s", cfg.Server.TransportMode))
 	}
+
+	// Create MCP server
+	mcpSrv := mcp.NewServer(&mcp.Implementation{
+		Name:    cfg.Server.Name,
+		Version: cfg.Server.Version,
+	}, nil)
 
 	// Create MCP Server
 	mcpServer := &MCPServer{
 		scheduler:     scheduler,
 		cmdExecutor:   cmdExecutor,
 		agentExecutor: agentExecutor,
+		server:        mcpSrv,
 		address:       cfg.Server.Address,
 		port:          cfg.Server.Port,
 		stopCh:        make(chan struct{}),
@@ -141,41 +156,6 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 	// Set up task routing
 	scheduler.SetTaskExecutor(mcpServer)
 
-	// Create transport based on mode
-	var svrTransport transport.ServerTransport
-	var err error
-
-	switch cfg.Server.TransportMode {
-	case "stdio":
-		// Create stdio transport
-		logger.Infof("Using stdio transport")
-		svrTransport = transport.NewStdioServerTransport()
-	case "sse":
-		// Create HTTP SSE transport
-		addr := fmt.Sprintf("%s:%d", cfg.Server.Address, cfg.Server.Port)
-		logger.Infof("Using SSE transport on %s", addr)
-
-		// Create SSE transport with the address
-		svrTransport, err = transport.NewSSEServerTransport(addr)
-		if err != nil {
-			return nil, errors.Internal(fmt.Errorf("failed to create SSE transport: %w", err))
-		}
-	default:
-		return nil, errors.InvalidInput(fmt.Sprintf("unsupported transport mode: %s", cfg.Server.TransportMode))
-	}
-
-	// Create MCP server with the transport
-	mcpServer.server, err = server.NewServer(
-		svrTransport,
-		server.WithServerInfo(protocol.Implementation{
-			Name:    cfg.Server.Name,
-			Version: cfg.Server.Version,
-		}),
-	)
-	if err != nil {
-		return nil, errors.Internal(fmt.Errorf("failed to create MCP server: %w", err))
-	}
-
 	return mcpServer, nil
 }
 
@@ -184,16 +164,31 @@ func (s *MCPServer) Start(ctx context.Context) error {
 	// Register all tools
 	s.registerToolsDeclarative()
 
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-
-		// Start the server
-		if err := s.server.Run(); err != nil {
-			s.logger.Errorf("Error running MCP server: %v", err)
-			return
-		}
-	}()
+	switch s.config.Server.TransportMode {
+	case "stdio":
+		runCtx, cancel := context.WithCancel(ctx)
+		s.cancel = cancel
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := s.server.Run(runCtx, &mcp.StdioTransport{}); err != nil {
+				s.logger.Errorf("Error running MCP server: %v", err)
+			}
+		}()
+	case "sse":
+		addr := fmt.Sprintf("%s:%d", s.address, s.port)
+		handler := mcp.NewSSEHandler(func(_ *http.Request) *mcp.Server {
+			return s.server
+		}, nil)
+		s.httpServer = &http.Server{Addr: addr, Handler: handler}
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				s.logger.Errorf("Error running MCP server: %v", err)
+			}
+		}()
+	}
 
 	// Listen for context cancellation
 	go func() {
@@ -219,11 +214,16 @@ func (s *MCPServer) Stop() error {
 
 	s.isShuttingDown = true
 
-	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
+	if s.cancel != nil {
+		s.cancel()
+	}
 
-	if err := s.server.Shutdown(ctx); err != nil {
-		return errors.Internal(fmt.Errorf("error shutting down MCP server: %w", err))
+	if s.httpServer != nil {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := s.httpServer.Shutdown(ctx); err != nil {
+			return errors.Internal(fmt.Errorf("error shutting down MCP server: %w", err))
+		}
 	}
 
 	// Only close stopCh if it hasn't been closed yet
@@ -239,7 +239,7 @@ func (s *MCPServer) Stop() error {
 }
 
 // handleListTasks lists all tasks
-func (s *MCPServer) handleListTasks(_ context.Context, _ *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleListTasks(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	s.logger.Debugf("Handling list_tasks request")
 
 	// Get all tasks
@@ -249,7 +249,7 @@ func (s *MCPServer) handleListTasks(_ context.Context, _ *protocol.CallToolReque
 }
 
 // handleGetTask gets a specific task by ID
-func (s *MCPServer) handleGetTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleGetTask(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
@@ -268,7 +268,7 @@ func (s *MCPServer) handleGetTask(_ context.Context, request *protocol.CallToolR
 }
 
 // handleAddTask adds a new shell command task
-func (s *MCPServer) handleAddTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleAddTask(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Extract parameters
 	var params TaskParams
 
@@ -296,7 +296,7 @@ func (s *MCPServer) handleAddTask(_ context.Context, request *protocol.CallToolR
 	return createTaskResponse(task)
 }
 
-func (s *MCPServer) handleAddAITask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleAddAITask(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Extract parameters
 	var params AITaskParams
 
@@ -344,7 +344,7 @@ func createBaseTask(name, schedule, description string, enabled bool) *model.Tas
 }
 
 // handleUpdateTask updates an existing task
-func (s *MCPServer) handleUpdateTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleUpdateTask(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Extract parameters
 	var params AITaskParams
 
@@ -365,7 +365,7 @@ func (s *MCPServer) handleUpdateTask(_ context.Context, request *protocol.CallTo
 	}
 
 	// Update fields with provided values
-	updateTaskFields(existingTask, params, request.RawArguments)
+	updateTaskFields(existingTask, params, request.Params.Arguments)
 
 	// Update task in scheduler
 	if err := s.scheduler.UpdateTask(existingTask); err != nil {
@@ -415,7 +415,7 @@ func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
 }
 
 // handleRemoveTask removes a task
-func (s *MCPServer) handleRemoveTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleRemoveTask(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
@@ -433,7 +433,7 @@ func (s *MCPServer) handleRemoveTask(_ context.Context, request *protocol.CallTo
 }
 
 // handleEnableTask enables a task
-func (s *MCPServer) handleEnableTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleEnableTask(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
@@ -457,7 +457,7 @@ func (s *MCPServer) handleEnableTask(_ context.Context, request *protocol.CallTo
 }
 
 // handleDisableTask disables a task
-func (s *MCPServer) handleDisableTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleDisableTask(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {

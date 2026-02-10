@@ -4,6 +4,7 @@ package server
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"os"
@@ -11,13 +12,13 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/jolks/mcp-cron/internal/agent"
 	"github.com/jolks/mcp-cron/internal/command"
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // createTestSchedulerConfig creates a default scheduler config for testing
@@ -196,14 +197,16 @@ func TestTaskCreationTimeFields(t *testing.T) {
 	beforeTime := time.Now().Add(-time.Second)
 
 	// Create a task using a mock request
-	mockRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
+	mockRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(`{
 			"name": "Test Task",
 			"schedule": "* * * * * *",
 			"command": "echo test",
 			"description": "Test task description",
 			"enabled": true
 		}`),
+		},
 	}
 
 	result, err := server.handleAddTask(context.Background(), mockRequest)
@@ -336,14 +339,16 @@ func TestTaskTypeHandling(t *testing.T) {
 	sched.SetTaskExecutor(server)
 
 	// Test 1: Create a task with default type (shell_command)
-	defaultTypeRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
+	defaultTypeRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(`{
 			"name": "Default Type Task",
 			"schedule": "* * * * *",
 			"command": "echo default",
 			"description": "Task with default type",
 			"enabled": false
 		}`),
+		},
 	}
 
 	result, err := server.handleAddTask(context.Background(), defaultTypeRequest)
@@ -355,8 +360,9 @@ func TestTaskTypeHandling(t *testing.T) {
 	}
 
 	// Test 2: Create a task with explicit AI type (case insensitive)
-	aiTypeRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
+	aiTypeRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(`{
 			"name": "AI Type Task",
 			"schedule": "* * * * *",
 			"prompt": "prompt for AI",
@@ -364,6 +370,7 @@ func TestTaskTypeHandling(t *testing.T) {
 			"type": "ai",
 			"enabled": false
 		}`),
+		},
 	}
 
 	result, err = server.handleAddAITask(context.Background(), aiTypeRequest)
@@ -375,8 +382,9 @@ func TestTaskTypeHandling(t *testing.T) {
 	}
 
 	// Test 3: Create a task with explicit AI type (different case)
-	aiTypeUpperRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(`{
+	aiTypeUpperRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(`{
 			"name": "AI Type Upper Task",
 			"schedule": "* * * * *",
 			"prompt": "prompt for AI",
@@ -384,6 +392,7 @@ func TestTaskTypeHandling(t *testing.T) {
 			"type": "AI",
 			"enabled": false
 		}`),
+		},
 	}
 
 	result, err = server.handleAddAITask(context.Background(), aiTypeUpperRequest)
@@ -437,11 +446,13 @@ func TestTaskTypeHandling(t *testing.T) {
 	}
 
 	// Test 4: Update task type from shell_command to AI
-	updateTypeRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(fmt.Sprintf(`{
+	updateTypeRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(fmt.Sprintf(`{
 			"id": "%s",
 			"type": "ai"
 		}`, defaultTypeTask.ID)),
+		},
 	}
 
 	result, err = server.handleUpdateTask(context.Background(), updateTypeRequest)
@@ -462,11 +473,13 @@ func TestTaskTypeHandling(t *testing.T) {
 	}
 
 	// Test 5: Update task type from AI to shell_command
-	updateTypeBackRequest := &protocol.CallToolRequest{
-		RawArguments: []byte(fmt.Sprintf(`{
+	updateTypeBackRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(fmt.Sprintf(`{
 			"id": "%s",
 			"type": "shell_command"
 		}`, aiLowerTypeTask.ID)),
+		},
 	}
 
 	result, err = server.handleUpdateTask(context.Background(), updateTypeBackRequest)

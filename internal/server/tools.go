@@ -3,9 +3,10 @@ package server
 
 import (
 	"context"
+	"reflect"
+	"strings"
 
-	"github.com/ThinkInAIXYZ/go-mcp/protocol"
-	"github.com/ThinkInAIXYZ/go-mcp/server"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // ToolDefinition represents a tool that can be registered with the MCP server
@@ -17,7 +18,7 @@ type ToolDefinition struct {
 	Description string
 
 	// Handler is the function that will be called when the tool is invoked
-	Handler func(context.Context, *protocol.CallToolRequest) (*protocol.CallToolResult, error)
+	Handler func(context.Context, *mcp.CallToolRequest) (*mcp.CallToolResult, error)
 
 	// Parameters is the parameter schema for the tool (can be a struct)
 	Parameters interface{}
@@ -83,15 +84,83 @@ func (s *MCPServer) registerToolsDeclarative() {
 	}
 }
 
-// registerToolWithError registers a tool with error handling
-func registerToolWithError(srv *server.Server, def ToolDefinition) {
-	tool, err := protocol.NewTool(def.Name, def.Description, def.Parameters)
-	if err != nil {
-		// In a real scenario, we might want to handle this differently,
-		// but for now we'll panic since this is a critical error
-		// that should never happen
-		panic(err)
+// registerToolWithError registers a tool with the MCP server
+func registerToolWithError(srv *mcp.Server, def ToolDefinition) {
+	schema := buildSchema(def.Parameters)
+	tool := &mcp.Tool{
+		Name:        def.Name,
+		Description: def.Description,
+		InputSchema: schema,
+	}
+	srv.AddTool(tool, def.Handler)
+}
+
+// buildSchema converts a Go struct with json and description tags into a JSON Schema object
+func buildSchema(params interface{}) map[string]interface{} {
+	t := reflect.TypeOf(params)
+	if t.Kind() == reflect.Ptr {
+		t = t.Elem()
 	}
 
-	srv.RegisterTool(tool, def.Handler)
+	properties := map[string]interface{}{}
+	var required []string
+
+	for i := 0; i < t.NumField(); i++ {
+		field := t.Field(i)
+
+		jsonTag := field.Tag.Get("json")
+		if jsonTag == "" || jsonTag == "-" {
+			continue
+		}
+
+		// Parse json tag to get field name and options
+		parts := strings.Split(jsonTag, ",")
+		fieldName := parts[0]
+		omitempty := false
+		for _, p := range parts[1:] {
+			if p == "omitempty" {
+				omitempty = true
+			}
+		}
+
+		prop := map[string]interface{}{
+			"type": goTypeToJSONType(field.Type),
+		}
+
+		if desc := field.Tag.Get("description"); desc != "" {
+			prop["description"] = desc
+		}
+
+		properties[fieldName] = prop
+
+		if !omitempty {
+			required = append(required, fieldName)
+		}
+	}
+
+	schema := map[string]interface{}{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
+}
+
+// goTypeToJSONType maps Go types to JSON Schema types
+func goTypeToJSONType(t reflect.Type) string {
+	switch t.Kind() {
+	case reflect.String:
+		return "string"
+	case reflect.Bool:
+		return "boolean"
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64,
+		reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64:
+		return "integer"
+	case reflect.Float32, reflect.Float64:
+		return "number"
+	default:
+		return "string"
+	}
 }
