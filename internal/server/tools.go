@@ -2,6 +2,8 @@
 package server
 
 import (
+	"context"
+
 	"github.com/ThinkInAIXYZ/go-mcp/protocol"
 	"github.com/ThinkInAIXYZ/go-mcp/server"
 )
@@ -15,7 +17,7 @@ type ToolDefinition struct {
 	Description string
 
 	// Handler is the function that will be called when the tool is invoked
-	Handler func(*protocol.CallToolRequest) (*protocol.CallToolResult, error)
+	Handler func(context.Context, *protocol.CallToolRequest) (*protocol.CallToolResult, error)
 
 	// Parameters is the parameter schema for the tool (can be a struct)
 	Parameters interface{}

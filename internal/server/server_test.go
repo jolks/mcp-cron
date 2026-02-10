@@ -206,7 +206,7 @@ func TestTaskCreationTimeFields(t *testing.T) {
 		}`),
 	}
 
-	result, err := server.handleAddTask(mockRequest)
+	result, err := server.handleAddTask(context.Background(), mockRequest)
 	if err != nil {
 		t.Fatalf("handleAddTask failed: %v", err)
 	}
@@ -346,7 +346,7 @@ func TestTaskTypeHandling(t *testing.T) {
 		}`),
 	}
 
-	result, err := server.handleAddTask(defaultTypeRequest)
+	result, err := server.handleAddTask(context.Background(), defaultTypeRequest)
 	if err != nil {
 		t.Fatalf("handleAddTask failed for default type: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestTaskTypeHandling(t *testing.T) {
 		}`),
 	}
 
-	result, err = server.handleAddAITask(aiTypeRequest)
+	result, err = server.handleAddAITask(context.Background(), aiTypeRequest)
 	if err != nil {
 		t.Fatalf("handleAddAITask failed for AI type: %v", err)
 	}
@@ -386,7 +386,7 @@ func TestTaskTypeHandling(t *testing.T) {
 		}`),
 	}
 
-	result, err = server.handleAddAITask(aiTypeUpperRequest)
+	result, err = server.handleAddAITask(context.Background(), aiTypeUpperRequest)
 	if err != nil {
 		t.Fatalf("handleAddAITask failed for AI uppercase type: %v", err)
 	}
@@ -444,7 +444,7 @@ func TestTaskTypeHandling(t *testing.T) {
 		}`, defaultTypeTask.ID)),
 	}
 
-	result, err = server.handleUpdateTask(updateTypeRequest)
+	result, err = server.handleUpdateTask(context.Background(), updateTypeRequest)
 	if err != nil {
 		t.Fatalf("handleUpdateTask failed for type update: %v", err)
 	}
@@ -469,7 +469,7 @@ func TestTaskTypeHandling(t *testing.T) {
 		}`, aiLowerTypeTask.ID)),
 	}
 
-	result, err = server.handleUpdateTask(updateTypeBackRequest)
+	result, err = server.handleUpdateTask(context.Background(), updateTypeBackRequest)
 	if err != nil {
 		t.Fatalf("handleUpdateTask failed for reverse type update: %v", err)
 	}

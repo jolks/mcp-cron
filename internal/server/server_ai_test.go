@@ -2,6 +2,7 @@
 package server
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"testing"
@@ -65,7 +66,7 @@ func TestHandleAddAITask_AI(t *testing.T) {
 	}
 
 	// Call the handler
-	result, err := server.handleAddAITask(validRequest)
+	result, err := server.handleAddAITask(context.Background(),validRequest)
 	if err != nil {
 		t.Fatalf("Valid request should not fail: %v", err)
 	}
@@ -86,7 +87,7 @@ func TestHandleAddAITask_AI(t *testing.T) {
 	}
 
 	// Call the handler
-	result, err = server.handleAddAITask(invalidRequest)
+	result, err = server.handleAddAITask(context.Background(),invalidRequest)
 	if err == nil {
 		t.Fatal("Invalid request should fail")
 	}
@@ -106,7 +107,7 @@ func TestHandleAddAITask_AI(t *testing.T) {
 	}
 
 	// Call the handler
-	result, err = server.handleAddAITask(missingNameRequest)
+	result, err = server.handleAddAITask(context.Background(),missingNameRequest)
 	if err == nil {
 		t.Fatal("Request with missing name should fail")
 	}
@@ -126,7 +127,7 @@ func TestHandleAddAITask_AI(t *testing.T) {
 	}
 
 	// Call the handler
-	result, err = server.handleAddAITask(missingScheduleRequest)
+	result, err = server.handleAddAITask(context.Background(),missingScheduleRequest)
 	if err == nil {
 		t.Fatal("Request with missing schedule should fail")
 	}
@@ -172,7 +173,7 @@ func TestUpdateAITask_AI(t *testing.T) {
 	}
 
 	// Call the handler
-	result, err := server.handleUpdateTask(updateRequest)
+	result, err := server.handleUpdateTask(context.Background(),updateRequest)
 	if err != nil {
 		t.Fatalf("Valid update should not fail: %v", err)
 	}
@@ -204,7 +205,7 @@ func TestUpdateAITask_AI(t *testing.T) {
 	}
 
 	// Call the handler
-	result, err = server.handleUpdateTask(multiUpdateRequest)
+	result, err = server.handleUpdateTask(context.Background(),multiUpdateRequest)
 	if err != nil {
 		t.Fatalf("Valid multi-update should not fail: %v", err)
 	}
@@ -269,7 +270,7 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 	}
 
 	// Call the handler
-	result, err := server.handleUpdateTask(updateRequest)
+	result, err := server.handleUpdateTask(context.Background(),updateRequest)
 	if err != nil {
 		t.Fatalf("Valid conversion should not fail: %v", err)
 	}
@@ -323,7 +324,7 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 	}
 
 	// Call the handler
-	result, err = server.handleUpdateTask(convertRequest)
+	result, err = server.handleUpdateTask(context.Background(),convertRequest)
 	if err != nil {
 		t.Fatalf("Valid conversion should not fail: %v", err)
 	}

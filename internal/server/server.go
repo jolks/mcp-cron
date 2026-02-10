@@ -239,7 +239,7 @@ func (s *MCPServer) Stop() error {
 }
 
 // handleListTasks lists all tasks
-func (s *MCPServer) handleListTasks(_ *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleListTasks(_ context.Context, _ *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	s.logger.Debugf("Handling list_tasks request")
 
 	// Get all tasks
@@ -249,7 +249,7 @@ func (s *MCPServer) handleListTasks(_ *protocol.CallToolRequest) (*protocol.Call
 }
 
 // handleGetTask gets a specific task by ID
-func (s *MCPServer) handleGetTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleGetTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
@@ -268,7 +268,7 @@ func (s *MCPServer) handleGetTask(request *protocol.CallToolRequest) (*protocol.
 }
 
 // handleAddTask adds a new shell command task
-func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleAddTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract parameters
 	var params TaskParams
 
@@ -296,7 +296,7 @@ func (s *MCPServer) handleAddTask(request *protocol.CallToolRequest) (*protocol.
 	return createTaskResponse(task)
 }
 
-func (s *MCPServer) handleAddAITask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleAddAITask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract parameters
 	var params AITaskParams
 
@@ -344,7 +344,7 @@ func createBaseTask(name, schedule, description string, enabled bool) *model.Tas
 }
 
 // handleUpdateTask updates an existing task
-func (s *MCPServer) handleUpdateTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleUpdateTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract parameters
 	var params AITaskParams
 
@@ -415,7 +415,7 @@ func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
 }
 
 // handleRemoveTask removes a task
-func (s *MCPServer) handleRemoveTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleRemoveTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
@@ -433,7 +433,7 @@ func (s *MCPServer) handleRemoveTask(request *protocol.CallToolRequest) (*protoc
 }
 
 // handleEnableTask enables a task
-func (s *MCPServer) handleEnableTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleEnableTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
@@ -457,7 +457,7 @@ func (s *MCPServer) handleEnableTask(request *protocol.CallToolRequest) (*protoc
 }
 
 // handleDisableTask disables a task
-func (s *MCPServer) handleDisableTask(request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
+func (s *MCPServer) handleDisableTask(_ context.Context, request *protocol.CallToolRequest) (*protocol.CallToolResult, error) {
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
