@@ -21,7 +21,7 @@ func newChatProvider(cfg *config.Config) (ChatProvider, error) {
 			apiKey = cfg.AI.APIKey
 		}
 		if apiKey == "" {
-			return nil, fmt.Errorf("Anthropic API key is not set in configuration")
+			return nil, fmt.Errorf("anthropic API key is not set in configuration")
 		}
 		return NewAnthropicProvider(apiKey), nil
 	default: // "openai" or empty

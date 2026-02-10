@@ -35,12 +35,12 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 
 	// Enable WAL mode for better concurrent read performance.
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("enable WAL mode: %w", err)
 	}
 
 	if err := runMigrations(db); err != nil {
-		db.Close()
+		_ = db.Close()
 		return nil, fmt.Errorf("run migrations: %w", err)
 	}
 
@@ -100,7 +100,7 @@ func (s *SQLiteStore) GetResults(taskID string, limit int) ([]*model.Result, err
 	if err != nil {
 		return nil, fmt.Errorf("query results: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var results []*model.Result
 	for rows.Next() {
@@ -190,7 +190,7 @@ func (s *SQLiteStore) LoadTasks() ([]*model.Task, error) {
 	if err != nil {
 		return nil, fmt.Errorf("query tasks: %w", err)
 	}
-	defer rows.Close()
+	defer func() { _ = rows.Close() }()
 
 	var tasks []*model.Task
 	for rows.Next() {

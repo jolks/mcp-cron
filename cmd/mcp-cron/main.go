@@ -150,7 +150,7 @@ func createApp(cfg *config.Config) (*Application, error) {
 	// Create the MCP server
 	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec, resultStore)
 	if err != nil {
-		resultStore.Close()
+		_ = resultStore.Close()
 		return nil, err
 	}
 

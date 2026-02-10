@@ -156,37 +156,37 @@ func TestFromEnv(t *testing.T) {
 	defer func() {
 		for key, value := range originalVars {
 			if value != "" {
-				os.Setenv(key, value)
+				_ = os.Setenv(key, value)
 			} else {
-				os.Unsetenv(key)
+				_ = os.Unsetenv(key)
 			}
 		}
 	}()
 
 	// Clear all relevant environment variables
 	for key := range originalVars {
-		os.Unsetenv(key)
+		_ = os.Unsetenv(key)
 	}
 
 	// Set test values
-	os.Setenv("MCP_CRON_SERVER_ADDRESS", "127.0.0.1")
-	os.Setenv("MCP_CRON_SERVER_PORT", "9090")
-	os.Setenv("MCP_CRON_SERVER_TRANSPORT", "stdio")
-	os.Setenv("MCP_CRON_SERVER_NAME", "test-server")
-	os.Setenv("MCP_CRON_SERVER_VERSION", "1.0.0")
-	os.Setenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT", "5m")
-	os.Setenv("MCP_CRON_LOGGING_LEVEL", "debug")
-	os.Setenv("MCP_CRON_LOGGING_FILE", "/tmp/test.log")
-	os.Setenv("MCP_CRON_AI_PROVIDER", "anthropic")
-	os.Setenv("MCP_CRON_AI_BASE_URL", "http://localhost:11434/v1")
-	os.Setenv("MCP_CRON_AI_API_KEY", "generic-key")
-	os.Setenv("OPENAI_API_KEY", "test-key")
-	os.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
-	os.Setenv("MCP_CRON_ENABLE_OPENAI_TESTS", "true")
-	os.Setenv("MCP_CRON_AI_MODEL", "gpt-4-turbo")
-	os.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "30")
-	os.Setenv("MCP_CRON_MCP_CONFIG_FILE_PATH", "/tmp/mcp.json")
-	os.Setenv("MCP_CRON_STORE_DB_PATH", "/tmp/custom-results.db")
+	_ = os.Setenv("MCP_CRON_SERVER_ADDRESS", "127.0.0.1")
+	_ = os.Setenv("MCP_CRON_SERVER_PORT", "9090")
+	_ = os.Setenv("MCP_CRON_SERVER_TRANSPORT", "stdio")
+	_ = os.Setenv("MCP_CRON_SERVER_NAME", "test-server")
+	_ = os.Setenv("MCP_CRON_SERVER_VERSION", "1.0.0")
+	_ = os.Setenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT", "5m")
+	_ = os.Setenv("MCP_CRON_LOGGING_LEVEL", "debug")
+	_ = os.Setenv("MCP_CRON_LOGGING_FILE", "/tmp/test.log")
+	_ = os.Setenv("MCP_CRON_AI_PROVIDER", "anthropic")
+	_ = os.Setenv("MCP_CRON_AI_BASE_URL", "http://localhost:11434/v1")
+	_ = os.Setenv("MCP_CRON_AI_API_KEY", "generic-key")
+	_ = os.Setenv("OPENAI_API_KEY", "test-key")
+	_ = os.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
+	_ = os.Setenv("MCP_CRON_ENABLE_OPENAI_TESTS", "true")
+	_ = os.Setenv("MCP_CRON_AI_MODEL", "gpt-4-turbo")
+	_ = os.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "30")
+	_ = os.Setenv("MCP_CRON_MCP_CONFIG_FILE_PATH", "/tmp/mcp.json")
+	_ = os.Setenv("MCP_CRON_STORE_DB_PATH", "/tmp/custom-results.db")
 
 	// Create a new config and apply environment variables
 	cfg := DefaultConfig()
@@ -249,7 +249,7 @@ func TestFromEnv(t *testing.T) {
 	}
 
 	// Test invalid port format
-	os.Setenv("MCP_CRON_SERVER_PORT", "invalid")
+	_ = os.Setenv("MCP_CRON_SERVER_PORT", "invalid")
 	cfg = DefaultConfig()
 	FromEnv(cfg)
 	if cfg.Server.Port != 8080 {
@@ -257,7 +257,7 @@ func TestFromEnv(t *testing.T) {
 	}
 
 	// Test invalid timeout format
-	os.Setenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT", "invalid")
+	_ = os.Setenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT", "invalid")
 	cfg = DefaultConfig()
 	FromEnv(cfg)
 	if cfg.Scheduler.DefaultTimeout != 10*time.Minute {
@@ -265,7 +265,7 @@ func TestFromEnv(t *testing.T) {
 	}
 
 	// Test invalid max tool iterations format
-	os.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "invalid")
+	_ = os.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "invalid")
 	cfg = DefaultConfig()
 	FromEnv(cfg)
 	if cfg.AI.MaxToolIterations != 20 {

@@ -654,7 +654,7 @@ func newTestStoreForScheduler(t *testing.T) *store.SQLiteStore {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
@@ -704,7 +704,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 
 	// Stop first scheduler
 	cancel()
-	s1.Stop()
+	_ = s1.Stop()
 
 	// Create second scheduler with same store, load tasks
 	s2 := NewScheduler(cfg)

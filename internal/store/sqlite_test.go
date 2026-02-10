@@ -16,7 +16,7 @@ func newTestStore(t *testing.T) *SQLiteStore {
 	if err != nil {
 		t.Fatalf("NewSQLiteStore: %v", err)
 	}
-	t.Cleanup(func() { s.Close() })
+	t.Cleanup(func() { _ = s.Close() })
 	return s
 }
 
@@ -198,14 +198,14 @@ func TestMigrationIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
-	s1.Close()
+	_ = s1.Close()
 
 	// Open again — migrations should be a no-op.
 	s2, err := NewSQLiteStore(dbPath)
 	if err != nil {
 		t.Fatalf("second open: %v", err)
 	}
-	s2.Close()
+	_ = s2.Close()
 }
 
 // --- Task persistence tests ---

@@ -412,11 +412,12 @@ func TestTaskTypeHandling(t *testing.T) {
 	// Check types
 	var defaultTypeTask, aiLowerTypeTask, aiUpperTypeTask *model.Task
 	for _, task := range tasks {
-		if task.Name == "Default Type Task" {
+		switch task.Name {
+		case "Default Type Task":
 			defaultTypeTask = task
-		} else if task.Name == "AI Type Task" {
+		case "AI Type Task":
 			aiLowerTypeTask = task
-		} else if task.Name == "AI Type Upper Task" {
+		case "AI Type Upper Task":
 			aiUpperTypeTask = task
 		}
 	}
