@@ -90,6 +90,8 @@ The following command line arguments are supported:
 | `--log-level` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `--log-file` | Log file path | stdout |
 | `--version` | Show version information and exit | `false` |
+| `--ai-provider` | AI provider: `openai` or `anthropic` | `openai` |
+| `--ai-base-url` | Custom base URL for OpenAI-compatible endpoints (e.g. Ollama, vLLM, Groq, LiteLLM) | Not set |
 | `--ai-model` | AI model to use for AI tasks | `gpt-4o` |
 | `--ai-max-iterations` | Maximum iterations for tool-enabled AI tasks | `20` |
 | `--mcp-config-path` | Path to MCP configuration file | `~/.cursor/mcp.json` |

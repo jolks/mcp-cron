@@ -25,6 +25,8 @@ var (
 	logLevel        = flag.String("log-level", "", "Logging level: debug, info, warn, error, fatal")
 	logFile         = flag.String("log-file", "", "Log file path (default: stdout)")
 	version         = flag.Bool("version", false, "Show version information and exit")
+	aiProvider      = flag.String("ai-provider", "", "AI provider: openai or anthropic (default: openai)")
+	aiBaseURL       = flag.String("ai-base-url", "", "Custom base URL for OpenAI-compatible endpoints (e.g. Ollama, vLLM, Groq, LiteLLM)")
 	aiModel         = flag.String("ai-model", "", "AI model to use for AI tasks (default: gpt-4o)")
 	aiMaxIterations = flag.Int("ai-max-iterations", 0, "Maximum iterations for tool-enabled AI tasks (default: 20)")
 	mcpConfigPath   = flag.String("mcp-config-path", "", "Path to MCP configuration file (default: ~/.cursor/mcp.json)")
@@ -96,6 +98,12 @@ func applyCommandLineFlagsToConfig(cfg *config.Config) {
 	}
 	if *logFile != "" {
 		cfg.Logging.FilePath = *logFile
+	}
+	if *aiProvider != "" {
+		cfg.AI.Provider = *aiProvider
+	}
+	if *aiBaseURL != "" {
+		cfg.AI.BaseURL = *aiBaseURL
 	}
 	if *aiModel != "" {
 		cfg.AI.Model = *aiModel
