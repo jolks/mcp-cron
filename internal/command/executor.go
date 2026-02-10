@@ -18,14 +18,16 @@ import (
 
 // CommandExecutor handles executing commands
 type CommandExecutor struct {
-	mu      sync.Mutex
-	results map[string]*model.Result // Map of taskID -> Result
+	mu          sync.Mutex
+	results     map[string]*model.Result // Map of taskID -> Result
+	resultStore model.ResultStore
 }
 
 // NewCommandExecutor creates a new command executor
-func NewCommandExecutor() *CommandExecutor {
+func NewCommandExecutor(store model.ResultStore) *CommandExecutor {
 	return &CommandExecutor{
-		results: make(map[string]*model.Result),
+		results:     make(map[string]*model.Result),
+		resultStore: store,
 	}
 }
 
@@ -42,7 +44,7 @@ func (ce *CommandExecutor) Execute(ctx context.Context, task *model.Task, timeou
 	// Execute the command
 	result := ce.ExecuteCommand(ctx, task.ID, task.Command, timeout)
 	if result.Error != "" {
-		return fmt.Errorf(result.Error)
+		return fmt.Errorf("%s", result.Error)
 	}
 
 	return nil
@@ -90,17 +92,24 @@ func (ce *CommandExecutor) ExecuteCommand(ctx context.Context, taskID, command s
 		result.ExitCode = 0
 	}
 
-	// Convert the result to JSON
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
+	// Persist result to store (best-effort)
+	if ce.resultStore != nil {
+		if storeErr := ce.resultStore.SaveResult(result); storeErr != nil {
+			log.Printf("WARN: failed to persist result for task %s: %v", taskID, storeErr)
+		}
+	}
+
+	// Convert the result to JSON for debug logging
+	jsonData, jsonErr := json.MarshalIndent(result, "", "  ")
+	if jsonErr != nil {
 		errorJSON, _ := json.Marshal(map[string]string{
 			"error":   "marshaling_error",
-			"message": err.Error(),
+			"message": jsonErr.Error(),
 			"task_id": taskID,
 		})
 		log.Println(string(errorJSON))
 	} else {
-		log.Println(string(jsonData))
+		log.Println("[DEBUG]", string(jsonData))
 	}
 
 	return result

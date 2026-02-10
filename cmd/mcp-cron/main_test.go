@@ -29,13 +29,13 @@ func TestMCPServerCreation(t *testing.T) {
 
 	// Create a scheduler and executors first
 	cronScheduler := scheduler.NewScheduler(&cfg.Scheduler)
-	commandExecutor := command.NewCommandExecutor()
+	commandExecutor := command.NewCommandExecutor(nil)
 
 	// Create agent executor with config
-	agentExecutor := agent.NewAgentExecutor(cfg)
+	agentExecutor := agent.NewAgentExecutor(cfg, nil)
 
 	// Create the server with custom config
-	mcpServer, err := server.NewMCPServer(cfg, cronScheduler, commandExecutor, agentExecutor)
+	mcpServer, err := server.NewMCPServer(cfg, cronScheduler, commandExecutor, agentExecutor, nil)
 
 	if err != nil {
 		t.Fatalf("Failed to create MCP server: %v", err)

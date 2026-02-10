@@ -4,6 +4,7 @@ package main
 import (
 	"context"
 	"flag"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -14,8 +15,10 @@ import (
 	"github.com/jolks/mcp-cron/internal/command"
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/logging"
+	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 	"github.com/jolks/mcp-cron/internal/server"
+	"github.com/jolks/mcp-cron/internal/store"
 )
 
 var (
@@ -30,6 +33,7 @@ var (
 	aiModel         = flag.String("ai-model", "", "AI model to use for AI tasks (default: gpt-4o)")
 	aiMaxIterations = flag.Int("ai-max-iterations", 0, "Maximum iterations for tool-enabled AI tasks (default: 20)")
 	mcpConfigPath   = flag.String("mcp-config-path", "", "Path to MCP configuration file (default: ~/.cursor/mcp.json)")
+	dbPath          = flag.String("db-path", "", "Path to SQLite database for result history (default: ~/.mcp-cron/results.db)")
 )
 
 func main() {
@@ -114,6 +118,9 @@ func applyCommandLineFlagsToConfig(cfg *config.Config) {
 	if *mcpConfigPath != "" {
 		cfg.AI.MCPConfigFilePath = *mcpConfigPath
 	}
+	if *dbPath != "" {
+		cfg.Store.DBPath = *dbPath
+	}
 }
 
 // Application represents the running application
@@ -121,20 +128,28 @@ type Application struct {
 	scheduler     *scheduler.Scheduler
 	cmdExecutor   *command.CommandExecutor
 	agentExecutor *agent.AgentExecutor
+	resultStore   model.ResultStore
 	server        *server.MCPServer
 	logger        *logging.Logger
 }
 
 // createApp creates a new application instance
 func createApp(cfg *config.Config) (*Application, error) {
+	// Create result store
+	resultStore, err := store.NewSQLiteStore(cfg.Store.DBPath)
+	if err != nil {
+		return nil, fmt.Errorf("create result store: %w", err)
+	}
+
 	// Create components
-	cmdExec := command.NewCommandExecutor()
-	agentExec := agent.NewAgentExecutor(cfg)
+	cmdExec := command.NewCommandExecutor(resultStore)
+	agentExec := agent.NewAgentExecutor(cfg, resultStore)
 	sched := scheduler.NewScheduler(&cfg.Scheduler)
 
 	// Create the MCP server
-	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec)
+	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec, resultStore)
 	if err != nil {
+		resultStore.Close()
 		return nil, err
 	}
 
@@ -146,6 +161,7 @@ func createApp(cfg *config.Config) (*Application, error) {
 		scheduler:     sched,
 		cmdExecutor:   cmdExec,
 		agentExecutor: agentExec,
+		resultStore:   resultStore,
 		server:        mcpServer,
 		logger:        logger,
 	}

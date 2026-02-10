@@ -21,9 +21,10 @@ internal/
   config/              # Config structs, defaults, env var loading, validation
   errors/              # Typed errors: NotFound, AlreadyExists, InvalidInput, Internal
   logging/             # Leveled logger (Debug/Info/Warn/Error/Fatal), file + stdout
-  model/               # Core types: Task, Result, TaskType, TaskStatus, Executor interface
+  model/               # Core types: Task, Result, TaskType, TaskStatus, Executor, ResultStore interfaces
   scheduler/           # Cron scheduling via robfig/cron, in-memory task storage
   server/              # MCP server, tool registration, HTTP/stdio transport, handlers
+  store/               # SQLite result store (persistent result history, schema migrations)
   utils/               # JSON unmarshal helper
 ```
 
@@ -34,12 +35,12 @@ internal/
 - **Handler signature**: `func (s *MCPServer) handle<Name>(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error)`
 - **Task types**: `shell_command` (runs a command) and `AI` (runs an LLM prompt)
 - **Task statuses**: pending, running, completed, failed, disabled
-- **Storage**: In-memory maps — no database
+- **Storage**: In-memory maps for task metadata; SQLite (`modernc.org/sqlite`, pure Go) for persistent result history
 - **Transport**: SSE (HTTP, default) or stdio (for CLI/Docker integration)
 
 ## MCP Tools Exposed
 
-list_tasks, get_task, add_task, add_ai_task, update_task, remove_task, enable_task, disable_task
+list_tasks, get_task, get_task_result, add_task, add_ai_task, update_task, remove_task, enable_task, disable_task
 
 ## Dependencies
 
@@ -47,6 +48,7 @@ list_tasks, get_task, add_task, add_ai_task, update_task, remove_task, enable_ta
 - `github.com/openai/openai-go` — OpenAI API client (for AI tasks)
 - `github.com/anthropics/anthropic-sdk-go` — Anthropic API client (for AI tasks)
 - `github.com/robfig/cron/v3` — Cron expression parsing and scheduling
+- `modernc.org/sqlite` — Pure-Go SQLite driver (no CGo) for persistent result history
 
 ## CI
 

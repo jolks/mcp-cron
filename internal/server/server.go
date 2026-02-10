@@ -42,6 +42,12 @@ type TaskIDParams struct {
 	ID string `json:"id" description:"the ID of the task to get/remove/enable/disable"`
 }
 
+// TaskResultParams holds parameters for the get_task_result tool
+type TaskResultParams struct {
+	ID    string `json:"id" description:"the ID of the task to get results for"`
+	Limit int    `json:"limit,omitempty" description:"number of recent results to return (default 1, max 100)"`
+}
+
 // AITaskParams combines task parameters with AI parameters
 type AITaskParams struct {
 	ID          string `json:"id,omitempty" description:"task ID"`
@@ -60,6 +66,7 @@ type MCPServer struct {
 	scheduler      *scheduler.Scheduler
 	cmdExecutor    *command.CommandExecutor
 	agentExecutor  *agent.AgentExecutor
+	resultStore    model.ResultStore
 	server         *mcp.Server
 	httpServer     *http.Server
 	cancel         context.CancelFunc
@@ -74,7 +81,7 @@ type MCPServer struct {
 }
 
 // NewMCPServer creates a new MCP scheduler server
-func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecutor *command.CommandExecutor, agentExecutor *agent.AgentExecutor) (*MCPServer, error) {
+func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecutor *command.CommandExecutor, agentExecutor *agent.AgentExecutor, resultStore model.ResultStore) (*MCPServer, error) {
 	// Create default config if not provided
 	if cfg == nil {
 		cfg = config.DefaultConfig()
@@ -145,6 +152,7 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		scheduler:     scheduler,
 		cmdExecutor:   cmdExecutor,
 		agentExecutor: agentExecutor,
+		resultStore:   resultStore,
 		server:        mcpSrv,
 		address:       cfg.Server.Address,
 		port:          cfg.Server.Port,
@@ -223,6 +231,13 @@ func (s *MCPServer) Stop() error {
 		defer cancel()
 		if err := s.httpServer.Shutdown(ctx); err != nil {
 			return errors.Internal(fmt.Errorf("error shutting down MCP server: %w", err))
+		}
+	}
+
+	// Close the result store
+	if s.resultStore != nil {
+		if err := s.resultStore.Close(); err != nil {
+			s.logger.Warnf("Error closing result store: %v", err)
 		}
 	}
 
@@ -480,6 +495,42 @@ func (s *MCPServer) handleDisableTask(_ context.Context, request *mcp.CallToolRe
 	return createTaskResponse(task)
 }
 
+// handleGetTaskResult returns execution results for a task
+func (s *MCPServer) handleGetTaskResult(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var params TaskResultParams
+	if err := extractParams(request, &params); err != nil {
+		return createErrorResponse(err)
+	}
+
+	if params.ID == "" {
+		return createErrorResponse(errors.InvalidInput("task ID is required"))
+	}
+
+	s.logger.Debugf("Handling get_task_result request for task %s (limit=%d)", params.ID, params.Limit)
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 1
+	}
+
+	if limit == 1 {
+		result, found := s.GetTaskResult(params.ID)
+		if !found {
+			return createErrorResponse(errors.NotFound("result", params.ID))
+		}
+		return createResultResponse(result)
+	}
+
+	results, err := s.GetTaskResults(params.ID, limit)
+	if err != nil {
+		return createErrorResponse(errors.Internal(fmt.Errorf("failed to get results: %w", err)))
+	}
+	if len(results) == 0 {
+		return createErrorResponse(errors.NotFound("result", params.ID))
+	}
+	return createResultsResponse(results)
+}
+
 // Execute implements the taskexec.Executor interface by routing tasks to the appropriate executor
 func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.Duration) error {
 	// Get the task type
@@ -505,15 +556,38 @@ func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.
 	}
 }
 
-// GetTaskResult retrieves execution result for a task regardless of executor type
+// GetTaskResult retrieves execution result for a task regardless of executor type.
+// It checks the persistent store first, then falls back to in-memory.
 func (s *MCPServer) GetTaskResult(taskID string) (*model.Result, bool) {
-	// First try to get the result from the agent executor
+	// Try the persistent store first.
+	if s.resultStore != nil {
+		if result, err := s.resultStore.GetLatestResult(taskID); err == nil && result != nil {
+			return result, true
+		}
+	}
+
+	// Fall back to in-memory results.
 	if result, exists := s.agentExecutor.GetTaskResult(taskID); exists {
 		return result, true
 	}
 
-	// If not found in agent executor, try the command executor
 	return s.cmdExecutor.GetTaskResult(taskID)
+}
+
+// GetTaskResults retrieves multiple execution results for a task.
+func (s *MCPServer) GetTaskResults(taskID string, limit int) ([]*model.Result, error) {
+	if s.resultStore != nil {
+		return s.resultStore.GetResults(taskID, limit)
+	}
+
+	// Fall back to in-memory (only latest available).
+	if result, exists := s.agentExecutor.GetTaskResult(taskID); exists {
+		return []*model.Result{result}, nil
+	}
+	if result, exists := s.cmdExecutor.GetTaskResult(taskID); exists {
+		return []*model.Result{result}, nil
+	}
+	return nil, nil
 }
 
 // Helper function to parse log level

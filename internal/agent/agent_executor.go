@@ -15,17 +15,18 @@ import (
 
 // AgentExecutor handles executing commands with an agent
 type AgentExecutor struct {
-	mu      sync.Mutex
-	results map[string]*model.Result // Map of taskID -> Result
-	config  *config.Config
-	// We'll add agent-specific fields here
+	mu          sync.Mutex
+	results     map[string]*model.Result // Map of taskID -> Result
+	config      *config.Config
+	resultStore model.ResultStore
 }
 
 // NewAgentExecutor creates a new agent executor
-func NewAgentExecutor(cfg *config.Config) *AgentExecutor {
+func NewAgentExecutor(cfg *config.Config, store model.ResultStore) *AgentExecutor {
 	return &AgentExecutor{
-		results: make(map[string]*model.Result),
-		config:  cfg,
+		results:     make(map[string]*model.Result),
+		config:      cfg,
+		resultStore: store,
 	}
 }
 
@@ -42,7 +43,7 @@ func (ae *AgentExecutor) Execute(ctx context.Context, task *model.Task, timeout 
 	// Execute the command
 	result := ae.ExecuteAgentTask(ctx, task.ID, task.Prompt, timeout)
 	if result.Error != "" {
-		return fmt.Errorf(result.Error)
+		return fmt.Errorf("%s", result.Error)
 	}
 
 	return nil
@@ -92,17 +93,24 @@ func (ae *AgentExecutor) ExecuteAgentTask(
 		result.ExitCode = 0
 	}
 
-	// Convert the result to JSON and log it
-	jsonData, err := json.MarshalIndent(result, "", "  ")
-	if err != nil {
+	// Persist result to store (best-effort)
+	if ae.resultStore != nil {
+		if storeErr := ae.resultStore.SaveResult(result); storeErr != nil {
+			log.Printf("WARN: failed to persist result for task %s: %v", taskID, storeErr)
+		}
+	}
+
+	// Convert the result to JSON for debug logging
+	jsonData, jsonErr := json.MarshalIndent(result, "", "  ")
+	if jsonErr != nil {
 		errorJSON, _ := json.Marshal(map[string]string{
 			"error":   "marshaling_error",
-			"message": err.Error(),
+			"message": jsonErr.Error(),
 			"task_id": taskID,
 		})
 		log.Println(string(errorJSON))
 	} else {
-		log.Println(string(jsonData))
+		log.Println("[DEBUG]", string(jsonData))
 	}
 
 	return result

@@ -23,6 +23,9 @@ type Config struct {
 
 	// AI configuration
 	AI AIConfig
+
+	// Store configuration
+	Store StoreConfig
 }
 
 // ServerConfig holds server-specific configuration
@@ -56,6 +59,12 @@ type LoggingConfig struct {
 
 	// Log file path (optional)
 	FilePath string
+}
+
+// StoreConfig holds result store configuration
+type StoreConfig struct {
+	// DBPath is the path to the SQLite database file
+	DBPath string
 }
 
 // AIConfig holds AI-specific configuration
@@ -107,6 +116,9 @@ func DefaultConfig() *Config {
 		Logging: LoggingConfig{
 			Level:    "info",
 			FilePath: "",
+		},
+		Store: StoreConfig{
+			DBPath: filepath.Join(os.Getenv("HOME"), ".mcp-cron", "results.db"),
 		},
 		AI: AIConfig{
 			Provider:          "openai",
@@ -193,6 +205,11 @@ func FromEnv(config *Config) {
 
 	if val := os.Getenv("MCP_CRON_LOGGING_FILE"); val != "" {
 		config.Logging.FilePath = val
+	}
+
+	// Store configuration
+	if val := os.Getenv("MCP_CRON_STORE_DB_PATH"); val != "" {
+		config.Store.DBPath = val
 	}
 
 	// AI configuration

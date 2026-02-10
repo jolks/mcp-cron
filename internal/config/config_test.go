@@ -41,6 +41,12 @@ func TestDefaultConfig(t *testing.T) {
 		t.Errorf("Expected default log file path to be empty, got '%s'", cfg.Logging.FilePath)
 	}
 
+	// Test Store defaults
+	expectedDBPath := filepath.Join(os.Getenv("HOME"), ".mcp-cron", "results.db")
+	if cfg.Store.DBPath != expectedDBPath {
+		t.Errorf("Expected default DB path to be '%s', got '%s'", expectedDBPath, cfg.Store.DBPath)
+	}
+
 	// Test AI defaults
 	if cfg.AI.Provider != "openai" {
 		t.Errorf("Expected default provider to be 'openai', got '%s'", cfg.AI.Provider)
@@ -143,6 +149,7 @@ func TestFromEnv(t *testing.T) {
 		"MCP_CRON_AI_MODEL":                  os.Getenv("MCP_CRON_AI_MODEL"),
 		"MCP_CRON_AI_MAX_TOOL_ITERATIONS":    os.Getenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS"),
 		"MCP_CRON_MCP_CONFIG_FILE_PATH":      os.Getenv("MCP_CRON_MCP_CONFIG_FILE_PATH"),
+		"MCP_CRON_STORE_DB_PATH":             os.Getenv("MCP_CRON_STORE_DB_PATH"),
 	}
 
 	// Restore environment variables after test
@@ -179,6 +186,7 @@ func TestFromEnv(t *testing.T) {
 	os.Setenv("MCP_CRON_AI_MODEL", "gpt-4-turbo")
 	os.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "30")
 	os.Setenv("MCP_CRON_MCP_CONFIG_FILE_PATH", "/tmp/mcp.json")
+	os.Setenv("MCP_CRON_STORE_DB_PATH", "/tmp/custom-results.db")
 
 	// Create a new config and apply environment variables
 	cfg := DefaultConfig()
@@ -235,6 +243,9 @@ func TestFromEnv(t *testing.T) {
 	}
 	if cfg.AI.MCPConfigFilePath != "/tmp/mcp.json" {
 		t.Errorf("Expected MCP config file path '/tmp/mcp.json', got '%s'", cfg.AI.MCPConfigFilePath)
+	}
+	if cfg.Store.DBPath != "/tmp/custom-results.db" {
+		t.Errorf("Expected store DB path '/tmp/custom-results.db', got '%s'", cfg.Store.DBPath)
 	}
 
 	// Test invalid port format

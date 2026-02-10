@@ -26,7 +26,7 @@ func NewTestAgentExecutor(mockFunc func(ctx context.Context, t *model.Task, cfg 
 	cfg := config.DefaultConfig()
 
 	return &TestAgentExecutor{
-		AgentExecutor: NewAgentExecutor(cfg),
+		AgentExecutor: NewAgentExecutor(cfg, nil),
 		mockRunTask:   mockFunc,
 	}
 }
@@ -161,7 +161,7 @@ func (tae *TestAgentExecutor) Execute(ctx context.Context, task *model.Task, tim
 	// Use our overridden ExecuteAgentTask
 	result := tae.ExecuteAgentTask(ctx, task.ID, task.Prompt, timeout)
 	if result.Error != "" {
-		return fmt.Errorf(result.Error)
+		return fmt.Errorf("%s", result.Error)
 	}
 
 	return nil

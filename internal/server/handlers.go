@@ -93,6 +93,38 @@ func createTasksResponse(tasks []*model.Task) (*mcp.CallToolResult, error) {
 	}, nil
 }
 
+// createResultResponse creates a response with a single result
+func createResultResponse(result *model.Result) (*mcp.CallToolResult, error) {
+	resultJSON, err := json.Marshal(result)
+	if err != nil {
+		return nil, errors.Internal(fmt.Errorf("failed to marshal result: %w", err))
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: string(resultJSON),
+			},
+		},
+	}, nil
+}
+
+// createResultsResponse creates a response with multiple results
+func createResultsResponse(results []*model.Result) (*mcp.CallToolResult, error) {
+	resultsJSON, err := json.Marshal(results)
+	if err != nil {
+		return nil, errors.Internal(fmt.Errorf("failed to marshal results: %w", err))
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: string(resultsJSON),
+			},
+		},
+	}, nil
+}
+
 // validateTaskParams validates the common task parameters
 func validateTaskParams(name, schedule string) error {
 	if name == "" || schedule == "" {

@@ -76,6 +76,12 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Handler:     s.handleDisableTask,
 			Parameters:  TaskIDParams{},
 		},
+		{
+			Name:        "get_task_result",
+			Description: "Gets execution results for a task. Returns the latest result by default, or recent history when limit > 1.",
+			Handler:     s.handleGetTaskResult,
+			Parameters:  TaskResultParams{},
+		},
 	}
 
 	// Register all the tools

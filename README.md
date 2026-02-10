@@ -14,7 +14,7 @@ Model Context Protocol (MCP) server for scheduling and managing tasks through a 
 ### Building from Source
 
 #### Prerequisites
-- Go 1.23.0 or higher
+- Go 1.24.0 or higher
 
 ```bash
 # Clone the repository
@@ -95,6 +95,7 @@ The following command line arguments are supported:
 | `--ai-model` | AI model to use for AI tasks | `gpt-4o` |
 | `--ai-max-iterations` | Maximum iterations for tool-enabled AI tasks | `20` |
 | `--mcp-config-path` | Path to MCP configuration file | `~/.cursor/mcp.json` |
+| `--db-path` | Path to SQLite database for result history | `~/.mcp-cron/results.db` |
 
 ### Environment Variables
 
@@ -119,6 +120,7 @@ The following environment variables are supported:
 | `MCP_CRON_AI_MODEL` | LLM model to use for AI tasks | `gpt-4o` |
 | `MCP_CRON_AI_MAX_TOOL_ITERATIONS` | Maximum iterations for tool-enabled tasks | `20` |
 | `MCP_CRON_MCP_CONFIG_FILE_PATH` | Path to MCP configuration file | `~/.cursor/mcp.json` |
+| `MCP_CRON_STORE_DB_PATH` | Path to SQLite database for result history | `~/.mcp-cron/results.db` |
 
 ### Logging
 
@@ -141,6 +143,7 @@ The server exposes several tools through the MCP protocol:
 6. `remove_task` - Removes a task by ID
 7. `enable_task` - Enables a disabled task
 8. `disable_task` - Disables an enabled task
+9. `get_task_result` - Gets execution results for a task (latest by default, or recent history with `limit`)
 
 ### Task Format
 
@@ -216,6 +219,7 @@ mcp-cron/
 │   ├── model/           # Data models and types
 │   ├── scheduler/       # Task scheduling
 │   ├── server/          # MCP server implementation
+│   ├── store/           # SQLite result store (persistent result history)
 │   └── utils/           # Miscellanous utilities
 ├── scripts/             # Utility scripts
 ├── go.mod               # Go modules definition

@@ -24,8 +24,8 @@ func createAITestServer(t *testing.T) *MCPServer {
 
 	// Create dependencies
 	sched := scheduler.NewScheduler(&cfg.Scheduler)
-	cmdExec := command.NewCommandExecutor()
-	agentExec := agent.NewAgentExecutor(cfg)
+	cmdExec := command.NewCommandExecutor(nil)
+	agentExec := agent.NewAgentExecutor(cfg, nil)
 
 	// Create a logger
 	logger := logging.New(logging.Options{

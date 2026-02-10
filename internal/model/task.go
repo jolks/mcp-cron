@@ -81,3 +81,11 @@ type Executor interface {
 type ResultProvider interface {
 	GetTaskResult(taskID string) (*Result, bool)
 }
+
+// ResultStore defines an interface for persisting and retrieving task execution results
+type ResultStore interface {
+	SaveResult(result *Result) error
+	GetLatestResult(taskID string) (*Result, error)
+	GetResults(taskID string, limit int) ([]*Result, error)
+	Close() error
+}
