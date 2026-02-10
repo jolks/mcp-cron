@@ -59,7 +59,6 @@ Config file example
 
 ### stdio
 The stdio transport is particularly useful for:
-- Claude Desktop which does not officially support SSE yet. See https://github.com/orgs/modelcontextprotocol/discussions/16
 - Direct piping to/from other processes
 - Integration with CLI tools
 - Testing in environments without HTTP

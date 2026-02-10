@@ -5,7 +5,7 @@ go 1.23.0
 toolchain go1.23.8
 
 require (
-	github.com/ThinkInAIXYZ/go-mcp v0.1.14
+	github.com/ThinkInAIXYZ/go-mcp v0.2.24
 	github.com/openai/openai-go v0.1.0-beta.10
 	github.com/robfig/cron/v3 v3.0.1
 )

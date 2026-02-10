@@ -47,7 +47,7 @@ func createSuccessResponse(message string) (*protocol.CallToolResult, error) {
 
 	return &protocol.CallToolResult{
 		Content: []protocol.Content{
-			protocol.TextContent{
+			&protocol.TextContent{
 				Type: "text",
 				Text: string(responseJSON),
 			},
@@ -71,7 +71,7 @@ func createTaskResponse(task *model.Task) (*protocol.CallToolResult, error) {
 
 	return &protocol.CallToolResult{
 		Content: []protocol.Content{
-			protocol.TextContent{
+			&protocol.TextContent{
 				Type: "text",
 				Text: string(taskJSON),
 			},
@@ -88,7 +88,7 @@ func createTasksResponse(tasks []*model.Task) (*protocol.CallToolResult, error) 
 
 	return &protocol.CallToolResult{
 		Content: []protocol.Content{
-			protocol.TextContent{
+			&protocol.TextContent{
 				Type: "text",
 				Text: string(tasksJSON),
 			},
