@@ -182,6 +182,8 @@ func (s *MCPServer) Start(ctx context.Context) error {
 			if err := s.server.Run(runCtx, &mcp.StdioTransport{}); err != nil {
 				s.logger.Errorf("Error running MCP server: %v", err)
 			}
+			// Signal that stdio transport has exited (e.g. stdin closed)
+			close(s.stopCh)
 		}()
 	case "sse":
 		addr := fmt.Sprintf("%s:%d", s.address, s.port)
@@ -251,6 +253,12 @@ func (s *MCPServer) Stop() error {
 
 	s.wg.Wait()
 	return nil
+}
+
+// Done returns a channel that is closed when the server's transport exits.
+// For stdio mode, this fires when stdin is closed (parent process exited).
+func (s *MCPServer) Done() <-chan struct{} {
+	return s.stopCh
 }
 
 // handleListTasks lists all tasks

@@ -63,8 +63,8 @@ func main() {
 		log.Fatalf("Failed to start application: %v", err)
 	}
 
-	// Wait for termination signal
-	waitForSignal(cancel, app)
+	// Wait for termination signal or server exit (e.g. stdin closed in stdio mode)
+	waitForShutdown(cancel, app)
 }
 
 // loadConfig loads configuration from environment and command line flags
@@ -211,13 +211,17 @@ func (a *Application) Stop() error {
 	return nil
 }
 
-// waitForSignal waits for termination signals and performs cleanup
-func waitForSignal(cancel context.CancelFunc, app *Application) {
+// waitForShutdown waits for termination signals or server exit and performs cleanup
+func waitForShutdown(cancel context.CancelFunc, app *Application) {
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
 
-	<-signalCh
-	app.logger.Infof("Received termination signal, shutting down...")
+	select {
+	case <-signalCh:
+		app.logger.Infof("Received termination signal, shutting down...")
+	case <-app.server.Done():
+		app.logger.Infof("Server transport exited, shutting down...")
+	}
 
 	// Cancel the context to initiate shutdown
 	cancel()

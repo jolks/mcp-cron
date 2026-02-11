@@ -42,7 +42,7 @@ scripts/
 - **Task types**: `shell_command` (runs a command) and `AI` (runs an LLM prompt)
 - **Task statuses**: pending, running, completed, failed, disabled
 - **Storage**: In-memory maps with SQLite write-through for task definitions; SQLite for persistent result history (`modernc.org/sqlite`, pure Go)
-- **Transport**: SSE (HTTP, default) or stdio (for CLI/Docker integration)
+- **Transport**: SSE (HTTP, default) or stdio (for CLI/Docker integration). Stdio mode auto-exits on stdin EOF via `server.Done()` channel.
 
 ## MCP Tools Exposed
 
