@@ -38,8 +38,9 @@ debug
 /dist/
 /bin/
 
-# npm platform package binaries (built by scripts/build-npm.sh)
+# npm build artifacts (built by scripts/build-npm.sh)
 npm/mcp-cron-*/bin/
+npm/*/README.md
 
 # Environment variables
 .env

@@ -68,6 +68,17 @@ for platform in "${PLATFORMS[@]}"; do
     "$REPO_ROOT/cmd/mcp-cron/main.go"
 done
 
+# Copy README into main package
+cp "$REPO_ROOT/README.md" "$REPO_ROOT/npm/mcp-cron/README.md"
+
+# Generate README for each platform package
+for platform in "${PLATFORMS[@]}"; do
+  pkg_name="mcp-cron-${platform%/*}-${platform#*/}"
+  echo "# $pkg_name" > "$REPO_ROOT/npm/$pkg_name/README.md"
+  echo "" >> "$REPO_ROOT/npm/$pkg_name/README.md"
+  echo "Platform-specific binary for [mcp-cron](https://www.npmjs.com/package/mcp-cron). Install \`mcp-cron\` instead — this package is installed automatically." >> "$REPO_ROOT/npm/$pkg_name/README.md"
+done
+
 echo ""
 echo "Build complete. Binaries:"
 find "$REPO_ROOT/npm" -name "mcp-cron" -o -name "mcp-cron.exe" | sort
