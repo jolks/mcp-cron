@@ -31,6 +31,9 @@ type Config struct {
 
 	// Store configuration
 	Store StoreConfig
+
+	// PreventSleep prevents the system from sleeping while mcp-cron is running
+	PreventSleep bool
 }
 
 // ServerConfig holds server-specific configuration
@@ -107,6 +110,11 @@ type AIConfig struct {
 
 // DefaultConfig returns the default configuration
 func DefaultConfig() *Config {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		home = os.Getenv("HOME")
+	}
+
 	return &Config{
 		Server: ServerConfig{
 			Address:       "localhost",
@@ -123,7 +131,7 @@ func DefaultConfig() *Config {
 			FilePath: "",
 		},
 		Store: StoreConfig{
-			DBPath: filepath.Join(os.Getenv("HOME"), ".mcp-cron", "results.db"),
+			DBPath: filepath.Join(home, ".mcp-cron", "results.db"),
 		},
 		AI: AIConfig{
 			Provider:          "openai",
@@ -134,7 +142,7 @@ func DefaultConfig() *Config {
 			EnableOpenAITests: false,
 			Model:             "gpt-4o",
 			MaxToolIterations: 20,
-			MCPConfigFilePath: filepath.Join(os.Getenv("HOME"), ".cursor", "mcp.json"),
+			MCPConfigFilePath: filepath.Join(home, ".cursor", "mcp.json"),
 		},
 	}
 }
@@ -254,5 +262,9 @@ func FromEnv(config *Config) {
 
 	if val := os.Getenv("MCP_CRON_MCP_CONFIG_FILE_PATH"); val != "" {
 		config.AI.MCPConfigFilePath = val
+	}
+
+	if val := os.Getenv("MCP_CRON_PREVENT_SLEEP"); val != "" {
+		config.PreventSleep = strings.ToLower(val) == "true"
 	}
 }

@@ -2,11 +2,15 @@
 package agent
 
 import (
+	"context"
+	"io"
+	"log"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/jolks/mcp-cron/internal/config"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func TestBuildToolsFromConfig(t *testing.T) {
@@ -16,6 +20,10 @@ func TestBuildToolsFromConfig(t *testing.T) {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 	defer func() { _ = os.RemoveAll(tempDir) }()
+
+	// Suppress expected log output from connection failures
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
 
 	// Create a valid MCP config file
 	validConfig := `{
@@ -89,19 +97,125 @@ func TestBuildToolsFromConfig(t *testing.T) {
 	if err == nil {
 		t.Error("Expected error for non-existent file, got nil")
 	}
-
-	// This test covers the syntax of the buildToolsFromConfig function
-	// and basic error handling, but for a complete test we would need
-	// to mock the MCP server or use a test server.
 }
 
-// Normally we might also have a TestDispatcher function, but we would need
-// to mock the MCP server for this, so for now we'll leave it out.
+func TestSelfReferenceDetection(t *testing.T) {
+	// Start a test MCP server that identifies as "mcp-cron" (self-reference)
+	srv := mcp.NewServer(&mcp.Implementation{Name: "mcp-cron", Version: "1.0.0"}, nil)
+	srv.AddTool(&mcp.Tool{
+		Name:        "list_tasks",
+		Description: "Lists all tasks",
+		InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+	}, func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{}, nil
+	})
 
-// Test dummy parameter workaround for empty schemas
-func TestEmptySchemaFix(t *testing.T) {
-	// We can't easily test this function directly, but we can verify
-	// that empty schemas are fixed when the dispatcher is created.
-	// This would require extensive mocking of the modelcontextprotocol/go-sdk library.
-	t.Skip("This test requires mocking the MCP server")
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	go func() {
+		_ = srv.Run(context.Background(), serverTransport)
+	}()
+
+	// Connect and verify the server identifies as "mcp-cron"
+	cli := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1.0.0"}, nil)
+	session, err := cli.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect to test server: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	res := session.InitializeResult()
+	if res == nil || res.ServerInfo == nil {
+		t.Fatal("No server info returned from handshake")
+	}
+	if res.ServerInfo.Name != "mcp-cron" {
+		t.Fatalf("Expected server name 'mcp-cron', got %q", res.ServerInfo.Name)
+	}
+
+	// Verify the self-reference check would match
+	cfg := config.DefaultConfig()
+	if res.ServerInfo.Name != cfg.Server.Name {
+		t.Errorf("Server name %q should match config server name %q", res.ServerInfo.Name, cfg.Server.Name)
+	}
+}
+
+func TestNonSelfServerNotSkipped(t *testing.T) {
+	// Start a test MCP server with a different name
+	srv := mcp.NewServer(&mcp.Implementation{Name: "other-server", Version: "1.0.0"}, nil)
+	srv.AddTool(&mcp.Tool{
+		Name:        "some_tool",
+		Description: "A tool from another server",
+		InputSchema: map[string]interface{}{
+			"type":       "object",
+			"properties": map[string]interface{}{},
+		},
+	}, func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{}, nil
+	})
+
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	go func() {
+		_ = srv.Run(context.Background(), serverTransport)
+	}()
+
+	// Connect and verify it would NOT be skipped
+	cli := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1.0.0"}, nil)
+	session, err := cli.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	res := session.InitializeResult()
+	if res == nil || res.ServerInfo == nil {
+		t.Fatal("No server info returned")
+	}
+
+	cfg := config.DefaultConfig()
+	if res.ServerInfo.Name == cfg.Server.Name {
+		t.Error("Non-self server should not match mcp-cron server name")
+	}
+
+	// Verify tools are listed (would be included, not skipped)
+	resp, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools failed: %v", err)
+	}
+	if len(resp.Tools) != 1 || resp.Tools[0].Name != "some_tool" {
+		t.Errorf("Expected 1 tool named 'some_tool', got %d tools", len(resp.Tools))
+	}
+}
+
+func TestSelfReferenceWithCustomServerName(t *testing.T) {
+	// Test that self-reference detection works with a custom server name
+	customName := "my-custom-cron"
+
+	srv := mcp.NewServer(&mcp.Implementation{Name: customName, Version: "1.0.0"}, nil)
+	clientTransport, serverTransport := mcp.NewInMemoryTransports()
+	go func() {
+		_ = srv.Run(context.Background(), serverTransport)
+	}()
+
+	cli := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1.0.0"}, nil)
+	session, err := cli.Connect(context.Background(), clientTransport, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	res := session.InitializeResult()
+	if res == nil || res.ServerInfo == nil {
+		t.Fatal("No server info returned")
+	}
+
+	// With default config name "mcp-cron", this should NOT match
+	cfg := config.DefaultConfig()
+	if res.ServerInfo.Name == cfg.Server.Name {
+		t.Error("Custom-named server should not match default mcp-cron name")
+	}
+
+	// With matching config name, it SHOULD match
+	cfg.Server.Name = customName
+	if res.ServerInfo.Name != cfg.Server.Name {
+		t.Error("Server name should match when config name is set to the same value")
+	}
 }

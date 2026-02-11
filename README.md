@@ -35,6 +35,32 @@ claude mcp add mcp-cron -- npx -y mcp-cron
 }
 ```
 
+#### Recommended Configuration
+
+A more complete setup with AI provider, model selection, and sleep prevention:
+
+```json
+{
+  "mcpServers": {
+    "mcp-cron": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-cron",
+        "--transport", "stdio",
+        "--prevent-sleep",
+        "--ai-provider", "anthropic",
+        "--ai-model", "claude-sonnet-4-5-20250929"
+      ],
+      "env": {
+        "ANTHROPIC_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+> See [Command Line Arguments](#command-line-arguments) and [Environment Variables](#environment-variables) for all available options.
+
 ### Building from Source
 
 #### Prerequisites
@@ -120,6 +146,7 @@ The following command line arguments are supported:
 | `--ai-max-iterations` | Maximum iterations for tool-enabled AI tasks | `20` |
 | `--mcp-config-path` | Path to MCP configuration file | `~/.cursor/mcp.json` |
 | `--db-path` | Path to SQLite database for result history | `~/.mcp-cron/results.db` |
+| `--prevent-sleep` | Prevent system from sleeping while mcp-cron is running (macOS and Windows) | `false` |
 
 ### Environment Variables
 
@@ -131,7 +158,7 @@ The following environment variables are supported:
 | `MCP_CRON_SERVER_PORT` | The port to bind the server to | `8080` |
 | `MCP_CRON_SERVER_TRANSPORT` | Transport mode: `sse` or `stdio` | `sse` |
 | `MCP_CRON_SERVER_NAME` | Server name | `mcp-cron` |
-| `MCP_CRON_SERVER_VERSION` | Server version | `0.1.0` |
+| `MCP_CRON_SERVER_VERSION` | Server version | `dev` |
 | `MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT` | Default timeout for task execution | `10m` |
 | `MCP_CRON_LOGGING_LEVEL` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `MCP_CRON_LOGGING_FILE` | Log file path | stdout |
@@ -145,6 +172,28 @@ The following environment variables are supported:
 | `MCP_CRON_AI_MAX_TOOL_ITERATIONS` | Maximum iterations for tool-enabled tasks | `20` |
 | `MCP_CRON_MCP_CONFIG_FILE_PATH` | Path to MCP configuration file | `~/.cursor/mcp.json` |
 | `MCP_CRON_STORE_DB_PATH` | Path to SQLite database for result history | `~/.mcp-cron/results.db` |
+| `MCP_CRON_PREVENT_SLEEP` | Prevent system from sleeping while mcp-cron is running (macOS and Windows) | `false` |
+
+### Sleep Prevention
+
+On laptops, the system may go to sleep and prevent scheduled tasks from running on time. Use the `--prevent-sleep` flag to keep the system awake while mcp-cron is running:
+
+```bash
+mcp-cron --prevent-sleep --transport stdio
+```
+
+Or via environment variable:
+```bash
+MCP_CRON_PREVENT_SLEEP=true mcp-cron --transport stdio
+```
+
+| Platform | Mechanism | Notes |
+|----------|-----------|-------|
+| macOS | `caffeinate` | Prevents idle sleep; automatically cleans up on exit |
+| Windows | `SetThreadExecutionState` | Prevents idle sleep; automatically cleans up on exit |
+| Linux | Not supported | Linux servers typically do not auto-sleep |
+
+> **Note:** This prevents idle sleep only. It does not prevent sleep from closing the laptop lid or pressing the power button.
 
 ### Logging
 
@@ -243,8 +292,9 @@ mcp-cron/
 │   ├── model/           # Data models and types
 │   ├── scheduler/       # Task scheduling
 │   ├── server/          # MCP server implementation
+│   ├── sleep/           # Platform-specific system sleep prevention
 │   ├── store/           # SQLite store (persistent task definitions + result history)
-│   └── utils/           # Miscellanous utilities
+│   └── utils/           # Miscellaneous utilities
 ├── npm/                 # npm packages (main + platform-specific binaries)
 ├── scripts/             # Build and publish scripts
 ├── go.mod               # Go modules definition

@@ -55,6 +55,18 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 			log.Printf("Failed to connect to server %s: %v\n", name, err)
 			continue
 		}
+
+		// Skip mcp-cron itself to prevent recursive task scheduling loops.
+		// The MCP handshake returns the server's identity, so we check that
+		// rather than relying on the config key name or tool names.
+		// We must close the session to kill the spawned child process,
+		// otherwise it loads tasks from SQLite and schedules duplicates.
+		if res := session.InitializeResult(); res != nil && res.ServerInfo != nil && res.ServerInfo.Name == sysCfg.Server.Name {
+			log.Printf("Skipping MCP server %q: detected as mcp-cron (self-reference)\n", name)
+			_ = session.Close()
+			continue
+		}
+
 		sessionBySrv[name] = session
 
 		resp, err := session.ListTools(context.Background(), nil)

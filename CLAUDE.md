@@ -8,7 +8,7 @@ Go MCP server for cron task scheduling (shell commands and AI prompts).
 go build ./...                # build all packages
 go test ./...                 # run all tests
 go test ./... -cover          # run tests with coverage
-golangci-lint run             # lint (CI uses vendor mode: --modules-download-mode vendor)
+go tool golangci-lint run     # lint (installed as go tool dependency in go.mod)
 ```
 
 ## Project Structure
@@ -24,6 +24,7 @@ internal/
   model/               # Core types: Task, Result, TaskType, TaskStatus, Executor, ResultStore interfaces
   scheduler/           # Cron scheduling via robfig/cron, in-memory task storage with SQLite write-through
   server/              # MCP server, tool registration, HTTP/stdio transport, handlers
+  sleep/               # Platform-specific system sleep prevention (macOS, Windows)
   store/               # SQLite store (persistent task definitions + result history, schema migrations)
   utils/               # JSON unmarshal helper
 npm/

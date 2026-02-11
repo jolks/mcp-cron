@@ -18,6 +18,7 @@ import (
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 	"github.com/jolks/mcp-cron/internal/server"
+	"github.com/jolks/mcp-cron/internal/sleep"
 	"github.com/jolks/mcp-cron/internal/store"
 )
 
@@ -34,6 +35,7 @@ var (
 	aiMaxIterations = flag.Int("ai-max-iterations", 0, "Maximum iterations for tool-enabled AI tasks (default: 20)")
 	mcpConfigPath   = flag.String("mcp-config-path", "", "Path to MCP configuration file (default: ~/.cursor/mcp.json)")
 	dbPath          = flag.String("db-path", "", "Path to SQLite database for result history (default: ~/.mcp-cron/results.db)")
+	preventSleep    = flag.Bool("prevent-sleep", false, "Prevent system from sleeping while mcp-cron is running (macOS and Windows only)")
 )
 
 func main() {
@@ -121,6 +123,9 @@ func applyCommandLineFlagsToConfig(cfg *config.Config) {
 	if *dbPath != "" {
 		cfg.Store.DBPath = *dbPath
 	}
+	if *preventSleep {
+		cfg.PreventSleep = true
+	}
 }
 
 // Application represents the running application
@@ -131,6 +136,7 @@ type Application struct {
 	resultStore   model.ResultStore
 	server        *server.MCPServer
 	logger        *logging.Logger
+	releaseSleep  func()
 }
 
 // createApp creates a new application instance
@@ -165,6 +171,17 @@ func createApp(cfg *config.Config) (*Application, error) {
 		resultStore:   resultStore,
 		server:        mcpServer,
 		logger:        logger,
+	}
+
+	// Prevent system sleep if configured
+	if cfg.PreventSleep {
+		release, err := sleep.Prevent()
+		if err != nil {
+			logger.Warnf("Failed to prevent system sleep: %v", err)
+		} else {
+			app.releaseSleep = release
+			logger.Infof("System sleep prevention enabled")
+		}
 	}
 
 	return app, nil
@@ -207,6 +224,12 @@ func (a *Application) Stop() error {
 		return err
 	}
 	a.logger.Infof("MCP server stopped")
+
+	// Release sleep prevention
+	if a.releaseSleep != nil {
+		a.releaseSleep()
+		a.logger.Infof("System sleep prevention released")
+	}
 
 	return nil
 }
