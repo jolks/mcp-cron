@@ -1,0 +1,21 @@
+{
+  "name": "mcp-cron",
+  "version": "0.1.0",
+  "description": "MCP server for cron task scheduling (shell commands and AI prompts)",
+  "license": "AGPL-3.0-only",
+  "bin": {
+    "mcp-cron": "bin/mcp-cron.js"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jolks/mcp-cron.git"
+  },
+  "optionalDependencies": {
+    "mcp-cron-darwin-amd64": "0.1.0",
+    "mcp-cron-darwin-arm64": "0.1.0",
+    "mcp-cron-linux-amd64": "0.1.0",
+    "mcp-cron-linux-arm64": "0.1.0",
+    "mcp-cron-windows-amd64": "0.1.0",
+    "mcp-cron-windows-arm64": "0.1.0"
+  }
+}

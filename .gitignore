@@ -38,6 +38,9 @@ debug
 /dist/
 /bin/
 
+# npm platform package binaries (built by scripts/build-npm.sh)
+npm/mcp-cron-*/bin/
+
 # Environment variables
 .env
 .env.local 

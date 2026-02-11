@@ -1,0 +1,12 @@
+{
+  "name": "mcp-cron-windows-amd64",
+  "version": "0.1.0",
+  "description": "mcp-cron binary for windows/amd64",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jolks/mcp-cron.git"
+  },
+  "os": ["win32"],
+  "cpu": ["x64"]
+}

@@ -1,0 +1,12 @@
+{
+  "name": "mcp-cron-darwin-arm64",
+  "version": "0.1.0",
+  "description": "mcp-cron binary for darwin/arm64",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jolks/mcp-cron.git"
+  },
+  "os": ["darwin"],
+  "cpu": ["arm64"]
+}

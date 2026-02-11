@@ -12,6 +12,29 @@ Model Context Protocol (MCP) server for scheduling and managing tasks through a 
 
 ## Installation
 
+### npm (recommended)
+
+```bash
+npx -y mcp-cron
+```
+
+#### Claude Code
+```bash
+claude mcp add mcp-cron -- npx -y mcp-cron
+```
+
+#### Cursor / Claude Desktop
+```json
+{
+  "mcpServers": {
+    "mcp-cron": {
+      "command": "npx",
+      "args": ["-y", "mcp-cron", "--transport", "stdio"]
+    }
+  }
+}
+```
+
 ### Building from Source
 
 #### Prerequisites
@@ -212,7 +235,7 @@ mcp-cron/
 ├── cmd/
 │   └── mcp-cron/        # Main application entry point
 ├── internal/
-│   ├── agent/           # AI agent execution functionality 
+│   ├── agent/           # AI agent execution functionality
 │   ├── command/         # Command execution functionality
 │   ├── config/          # Configuration handling
 │   ├── errors/          # Error types and handling
@@ -222,7 +245,8 @@ mcp-cron/
 │   ├── server/          # MCP server implementation
 │   ├── store/           # SQLite store (persistent task definitions + result history)
 │   └── utils/           # Miscellanous utilities
-├── scripts/             # Utility scripts
+├── npm/                 # npm packages (main + platform-specific binaries)
+├── scripts/             # Build and publish scripts
 ├── go.mod               # Go modules definition
 ├── go.sum               # Go modules checksums
 └── README.md            # Project documentation

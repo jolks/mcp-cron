@@ -26,6 +26,12 @@ internal/
   server/              # MCP server, tool registration, HTTP/stdio transport, handlers
   store/               # SQLite store (persistent task definitions + result history, schema migrations)
   utils/               # JSON unmarshal helper
+npm/
+  mcp-cron/            # Main npm package — JS wrapper that spawns the platform binary
+  mcp-cron-{os}-{arch}/ # Platform-specific packages (darwin/linux/windows × amd64/arm64)
+scripts/
+  build-npm.sh         # Cross-compile Go binaries for all platforms, optional version update
+  publish-npm.sh       # Publish all 7 npm packages (platform packages first, then main)
 ```
 
 ## Key Conventions
@@ -50,6 +56,15 @@ list_tasks, get_task, get_task_result, add_task, add_ai_task, update_task, remov
 - `github.com/robfig/cron/v3` — Cron expression parsing and scheduling
 - `modernc.org/sqlite` — Pure-Go SQLite driver (no CGo) for persistent result history
 
+## npm Packaging
+
+Uses the `optionalDependencies` pattern (same as esbuild): one main package (`mcp-cron`) with a JS wrapper + 6 platform-specific packages containing pre-built Go binaries. npm installs only the matching platform package via `os`/`cpu` fields.
+
+- **Build**: `./scripts/build-npm.sh [version]` — cross-compiles all platforms, optionally updates version
+- **Publish**: `./scripts/publish-npm.sh [--dry-run]` — publishes platform packages first, then main
+- **Versions**: All 7 `package.json` files must have matching versions (build script handles this)
+
 ## CI
 
-GitHub Actions (`.github/workflows/go-test.yml`): runs `golangci-lint` + `go test ./... -cover` on pushes and PRs to main.
+- `.github/workflows/go-test.yml`: runs `golangci-lint` + `go test ./... -cover` on pushes and PRs to main
+- `.github/workflows/npm-publish.yml`: triggered on `v*` tags — cross-compiles, then publishes all npm packages
