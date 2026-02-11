@@ -63,7 +63,13 @@ for platform in "${PLATFORMS[@]}"; do
   echo "Building $GOOS/$GOARCH -> npm/$pkg_name/bin/$exe_name"
 
   mkdir -p "$bin_dir"
+  LDFLAGS=""
+  if [ -n "$VERSION" ]; then
+    LDFLAGS="-X github.com/jolks/mcp-cron/internal/config.Version=$VERSION"
+  fi
+
   CGO_ENABLED=0 GOOS="$GOOS" GOARCH="$GOARCH" go build \
+    -ldflags "$LDFLAGS" \
     -o "$bin_dir/$exe_name" \
     "$REPO_ROOT/cmd/mcp-cron/main.go"
 done

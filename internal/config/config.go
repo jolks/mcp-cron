@@ -10,6 +10,11 @@ import (
 	"time"
 )
 
+// Version is the default version, overridden at build time via:
+//
+//	-ldflags "-X github.com/jolks/mcp-cron/internal/config.Version=1.2.3"
+var Version = "dev"
+
 // Config holds the application configuration
 type Config struct {
 	// Server configuration
@@ -108,7 +113,7 @@ func DefaultConfig() *Config {
 			Port:          8080,
 			TransportMode: "sse",
 			Name:          "mcp-cron",
-			Version:       "0.1.0",
+			Version:       Version,
 		},
 		Scheduler: SchedulerConfig{
 			DefaultTimeout: 10 * time.Minute,

@@ -24,8 +24,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Server.Name != "mcp-cron" {
 		t.Errorf("Expected default server name to be 'mcp-cron', got '%s'", cfg.Server.Name)
 	}
-	if cfg.Server.Version != "0.1.0" {
-		t.Errorf("Expected default server version to be '0.1.0', got '%s'", cfg.Server.Version)
+	if cfg.Server.Version != "dev" {
+		t.Errorf("Expected default server version to be 'dev', got '%s'", cfg.Server.Version)
 	}
 
 	// Test Scheduler defaults

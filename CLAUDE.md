@@ -36,6 +36,7 @@ scripts/
 
 ## Key Conventions
 
+- **Versioning**: `config.Version` defaults to `"dev"` and is injected at build time via `-ldflags "-X github.com/jolks/mcp-cron/internal/config.Version=X.Y.Z"`. The build script and CI handle this automatically from the git tag — never hardcode a version in source.
 - **Vendor directory**: `vendor/` is gitignored — do NOT commit it. Dependencies are tracked via `go.mod` + `go.sum`; run `go mod vendor` locally to recreate.
 - **License header**: Every Go file starts with `// SPDX-License-Identifier: AGPL-3.0-only`
 - **Handler signature**: `func (s *MCPServer) handle<Name>(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error)`
