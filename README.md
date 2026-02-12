@@ -59,6 +59,32 @@ A more complete setup with AI provider, model selection, and sleep prevention:
 }
 ```
 
+#### Using LiteLLM
+
+To route AI tasks through a [LiteLLM](https://docs.litellm.ai/) proxy:
+
+```json
+{
+  "mcpServers": {
+    "mcp-cron": {
+      "command": "npx",
+      "args": [
+        "-y", "mcp-cron",
+        "--transport", "stdio",
+        "--prevent-sleep",
+        "--ai-base-url", "https://litellm.yourcompany.com",
+        "--ai-model", "claude-sonnet-4-5-20250929"
+      ],
+      "env": {
+        "MCP_CRON_AI_API_KEY": "sk-your-litellm-key"
+      }
+    }
+  }
+}
+```
+
+> The `--ai-model` value should match a model name in your LiteLLM proxy config. LiteLLM exposes an OpenAI-compatible API, so `--ai-provider` can be omitted (defaults to `openai`).
+
 > See [Command Line Arguments](#command-line-arguments) and [Environment Variables](#environment-variables) for all available options.
 
 ### Building from Source
