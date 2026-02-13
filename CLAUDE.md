@@ -9,6 +9,9 @@ go build ./...                # build all packages
 go test ./...                 # run all tests
 go test ./... -cover          # run tests with coverage
 go tool golangci-lint run     # lint (installed as go tool dependency in go.mod)
+go test ./internal/server/ -run TestIntegration -v  # integration tests only
+MCP_CRON_ENABLE_OPENAI_TESTS=true go test ./...     # include AI integration tests (requires OPENAI_API_KEY)
+MCP_CRON_ENABLE_ANTHROPIC_TESTS=true go test ./...  # include AI integration tests (requires ANTHROPIC_API_KEY)
 ```
 
 ## Project Structure

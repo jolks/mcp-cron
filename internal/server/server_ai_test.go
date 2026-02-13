@@ -53,10 +53,12 @@ func TestHandleAddAITask_AI(t *testing.T) {
 
 	// Test case 1: Valid AI task with minimum fields
 	validTask := AITaskParams{
-		Name:     "AI Test Task",
-		Schedule: "*/5 * * * *",
-		Prompt:   "Generate a report on system health",
-		Enabled:  true,
+		TaskParams: TaskParams{
+			Name:     "AI Test Task",
+			Schedule: "*/5 * * * *",
+			Enabled:  true,
+		},
+		Prompt: "Generate a report on system health",
 	}
 
 	// Create the request with the valid task
@@ -78,8 +80,10 @@ func TestHandleAddAITask_AI(t *testing.T) {
 
 	// Test case 2: Missing required fields (prompt)
 	invalidTask := AITaskParams{
-		Name:     "Invalid AI Task",
-		Schedule: "*/5 * * * *",
+		TaskParams: TaskParams{
+			Name:     "Invalid AI Task",
+			Schedule: "*/5 * * * *",
+		},
 		// Missing prompt
 	}
 
@@ -101,8 +105,10 @@ func TestHandleAddAITask_AI(t *testing.T) {
 
 	// Test case 3: Missing required fields (name)
 	missingNameTask := AITaskParams{
-		Schedule: "*/5 * * * *",
-		Prompt:   "Generate a report on system health",
+		TaskParams: TaskParams{
+			Schedule: "*/5 * * * *",
+		},
+		Prompt: "Generate a report on system health",
 	}
 
 	missingNameRequestJSON, _ := json.Marshal(missingNameTask)
@@ -123,7 +129,9 @@ func TestHandleAddAITask_AI(t *testing.T) {
 
 	// Test case 4: Missing required fields (schedule)
 	missingScheduleTask := AITaskParams{
-		Name:   "Missing Schedule Task",
+		TaskParams: TaskParams{
+			Name: "Missing Schedule Task",
+		},
 		Prompt: "Generate a report on system health",
 	}
 
@@ -171,7 +179,9 @@ func TestUpdateAITask_AI(t *testing.T) {
 
 	// Test case 1: Update AI task prompt
 	updateParams := AITaskParams{
-		ID:     taskID,
+		TaskParams: TaskParams{
+			ID: taskID,
+		},
 		Prompt: "Updated prompt",
 	}
 
@@ -202,11 +212,13 @@ func TestUpdateAITask_AI(t *testing.T) {
 
 	// Test case 2: Update multiple fields
 	multiUpdateParams := AITaskParams{
-		ID:          taskID,
-		Name:        "Updated AI Task",
-		Schedule:    "*/10 * * * *",
-		Description: "Updated description",
-		Enabled:     true,
+		TaskParams: TaskParams{
+			ID:          taskID,
+			Name:        "Updated AI Task",
+			Schedule:    "*/10 * * * *",
+			Description: "Updated description",
+			Enabled:     true,
+		},
 	}
 
 	multiUpdateRequestJSON, _ := json.Marshal(multiUpdateParams)
@@ -271,8 +283,10 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 
 	// Convert shell command task to AI task
 	updateParams := AITaskParams{
-		ID:     shellTaskID,
-		Type:   model.TypeAI.String(),
+		TaskParams: TaskParams{
+			ID:   shellTaskID,
+			Type: model.TypeAI.String(),
+		},
 		Prompt: "New AI prompt",
 	}
 
@@ -327,9 +341,11 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 
 	// Convert AI task to shell command task
 	convertParams := AITaskParams{
-		ID:      aiTaskID,
-		Type:    model.TypeShellCommand.String(),
-		Command: "echo converted",
+		TaskParams: TaskParams{
+			ID:      aiTaskID,
+			Type:    model.TypeShellCommand.String(),
+			Command: "echo converted",
+		},
 	}
 
 	convertRequestJSON, _ := json.Marshal(convertParams)

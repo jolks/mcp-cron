@@ -42,37 +42,37 @@ func (s *MCPServer) registerToolsDeclarative() {
 		},
 		{
 			Name:        "add_task",
-			Description: "Adds a new scheduled shell command task",
+			Description: "Adds a new scheduled shell command task. Requires 'name', 'schedule', and 'command'. Set 'enabled' to true to activate immediately.",
 			Handler:     s.handleAddTask,
 			Parameters:  TaskParams{},
 		},
 		{
 			Name:        "add_ai_task",
-			Description: "Adds a new scheduled AI (LLM) task. Use the 'prompt' field to directly specify what the AI should do.",
+			Description: "Adds a new scheduled AI (LLM) task. Requires 'name', 'schedule', and 'prompt'. The prompt specifies what the AI should do when the task runs. Set 'enabled' to true to activate immediately.",
 			Handler:     s.handleAddAITask,
 			Parameters:  AITaskParams{},
 		},
 		{
 			Name:        "update_task",
-			Description: "Updates an existing task",
+			Description: "Updates an existing task. Requires 'id'. Only provided fields are updated; omitted fields remain unchanged.",
 			Handler:     s.handleUpdateTask,
 			Parameters:  AITaskParams{},
 		},
 		{
 			Name:        "remove_task",
-			Description: "Removes a task by ID",
+			Description: "Permanently removes a task by ID",
 			Handler:     s.handleRemoveTask,
 			Parameters:  TaskIDParams{},
 		},
 		{
 			Name:        "enable_task",
-			Description: "Enables a disabled task",
+			Description: "Enables a disabled task so it runs on its schedule",
 			Handler:     s.handleEnableTask,
 			Parameters:  TaskIDParams{},
 		},
 		{
 			Name:        "disable_task",
-			Description: "Disables an enabled task",
+			Description: "Disables a task so it stops running on its schedule but is not removed",
 			Handler:     s.handleDisableTask,
 			Parameters:  TaskIDParams{},
 		},
@@ -111,8 +111,29 @@ func buildSchema(params interface{}) map[string]interface{} {
 	properties := map[string]interface{}{}
 	var required []string
 
+	collectFields(t, properties, &required)
+
+	schema := map[string]interface{}{
+		"type":       "object",
+		"properties": properties,
+	}
+	if len(required) > 0 {
+		schema["required"] = required
+	}
+	return schema
+}
+
+// collectFields extracts JSON schema properties from struct fields,
+// recursing into embedded (anonymous) structs.
+func collectFields(t reflect.Type, properties map[string]interface{}, required *[]string) {
 	for i := 0; i < t.NumField(); i++ {
 		field := t.Field(i)
+
+		// Recurse into embedded structs
+		if field.Anonymous && field.Type.Kind() == reflect.Struct {
+			collectFields(field.Type, properties, required)
+			continue
+		}
 
 		jsonTag := field.Tag.Get("json")
 		if jsonTag == "" || jsonTag == "-" {
@@ -140,18 +161,9 @@ func buildSchema(params interface{}) map[string]interface{} {
 		properties[fieldName] = prop
 
 		if !omitempty {
-			required = append(required, fieldName)
+			*required = append(*required, fieldName)
 		}
 	}
-
-	schema := map[string]interface{}{
-		"type":       "object",
-		"properties": properties,
-	}
-	if len(required) > 0 {
-		schema["required"] = required
-	}
-	return schema
 }
 
 // goTypeToJSONType maps Go types to JSON Schema types

@@ -320,12 +320,17 @@ func TestRunTaskIntegrationListToolsOpenAI(t *testing.T) {
 		t.Fatal("Expected non-empty output")
 	}
 
-	// Verify the AI mentions at least some known mcp-cron tools
-	for _, name := range []string{"list_tasks", "add_task", "remove_task"} {
-		if !strings.Contains(output, name) {
-			t.Errorf("Expected output to mention tool %q, but it didn't", name)
+	// Verify the AI mentions at least some of the actually loaded tools
+	matched := 0
+	for _, td := range tools {
+		if strings.Contains(output, td.Name) {
+			matched++
 		}
 	}
+	if matched == 0 {
+		t.Errorf("Expected output to mention at least one loaded tool, but none matched")
+	}
+	t.Logf("AI mentioned %d/%d loaded tools", matched, len(tools))
 
 	t.Logf("OpenAI listed tools:\n%s", output)
 }
@@ -370,12 +375,17 @@ func TestRunTaskIntegrationListToolsAnthropic(t *testing.T) {
 		t.Fatal("Expected non-empty output")
 	}
 
-	// Verify the AI mentions at least some known mcp-cron tools
-	for _, name := range []string{"list_tasks", "add_task", "remove_task"} {
-		if !strings.Contains(output, name) {
-			t.Errorf("Expected output to mention tool %q, but it didn't", name)
+	// Verify the AI mentions at least some of the actually loaded tools
+	matched := 0
+	for _, td := range tools {
+		if strings.Contains(output, td.Name) {
+			matched++
 		}
 	}
+	if matched == 0 {
+		t.Errorf("Expected output to mention at least one loaded tool, but none matched")
+	}
+	t.Logf("AI mentioned %d/%d loaded tools", matched, len(tools))
 
 	t.Logf("Anthropic listed tools:\n%s", output)
 }

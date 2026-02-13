@@ -328,18 +328,15 @@ mcp-cron/
 └── README.md            # Project documentation
 ```
 
-### Building and Testing
+### Building
 
 ```bash
-# Build the application
 go build -o mcp-cron cmd/mcp-cron/main.go
-
-# Run tests
-go test ./...
-
-# Run tests and check coverage
-go test ./... -cover
 ```
+
+### Testing
+
+See [docs/testing.md](docs/testing.md) for the full testing guide, including integration tests and AI task tests.
 
 ## Acknowledgments
 

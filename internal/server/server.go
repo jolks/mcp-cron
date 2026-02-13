@@ -29,12 +29,12 @@ var osOpenFile = os.OpenFile
 // TaskParams holds parameters for various task operations
 type TaskParams struct {
 	ID          string `json:"id,omitempty" description:"task ID"`
-	Name        string `json:"name,omitempty" description:"task name"`
-	Schedule    string `json:"schedule,omitempty" description:"cron schedule expression"`
-	Type        string `json:"type,omitempty" description:"task type"`
-	Command     string `json:"command,omitempty" description:"command to execute"`
+	Name        string `json:"name" description:"task name (required)"`
+	Schedule    string `json:"schedule" description:"cron expression (second optional): e.g. '*/5 * * * *' (every 5 min), '0 9 * * MON-FRI' (weekdays 9am), '@every 30s', '@hourly', '@daily' (required)"`
+	Type        string `json:"type,omitempty" description:"task type: 'shell_command' or 'AI'"`
+	Command     string `json:"command,omitempty" description:"shell command to execute (required for shell_command tasks)"`
 	Description string `json:"description,omitempty" description:"task description"`
-	Enabled     bool   `json:"enabled,omitempty" description:"whether the task is enabled"`
+	Enabled     bool   `json:"enabled,omitempty" description:"whether the task is enabled (defaults to false; set to true to activate immediately)"`
 }
 
 // TaskIDParams holds the ID parameter used by multiple handlers
@@ -48,17 +48,10 @@ type TaskResultParams struct {
 	Limit int    `json:"limit,omitempty" description:"number of recent results to return (default 1, max 100)"`
 }
 
-// AITaskParams combines task parameters with AI parameters
+// AITaskParams combines task parameters with AI-specific parameters
 type AITaskParams struct {
-	ID          string `json:"id,omitempty" description:"task ID"`
-	Name        string `json:"name,omitempty" description:"task name"`
-	Schedule    string `json:"schedule,omitempty" description:"cron schedule expression"`
-	Type        string `json:"type,omitempty" description:"task type"`
-	Command     string `json:"command,omitempty" description:"command to execute"`
-	Description string `json:"description,omitempty" description:"task description"`
-	Enabled     bool   `json:"enabled,omitempty" description:"whether the task is enabled"`
-	// LLM Prompt
-	Prompt string `json:"prompt,omitempty" description:"prompt to use for AI"`
+	TaskParams
+	Prompt string `json:"prompt" description:"prompt for the AI to execute (required for AI tasks)"`
 }
 
 // MCPServer represents the MCP scheduler server
