@@ -88,6 +88,8 @@ type TaskStore interface {
 	UpdateTask(task *Task) error
 	DeleteTask(taskID string) error
 	LoadTasks() ([]*Task, error)
+	GetDueTasks(now time.Time) ([]*Task, error)
+	AdvanceNextRun(taskID string, currentNextRun time.Time, newNextRun time.Time) (bool, error)
 }
 
 // ResultStore defines an interface for persisting and retrieving task execution results

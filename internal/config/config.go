@@ -58,6 +58,9 @@ type ServerConfig struct {
 type SchedulerConfig struct {
 	// Default task timeout
 	DefaultTimeout time.Duration
+
+	// PollInterval is how often the scheduler checks for due tasks
+	PollInterval time.Duration
 }
 
 // LoggingConfig holds logging-specific configuration
@@ -125,6 +128,7 @@ func DefaultConfig() *Config {
 		},
 		Scheduler: SchedulerConfig{
 			DefaultTimeout: 10 * time.Minute,
+			PollInterval:   1 * time.Second,
 		},
 		Logging: LoggingConfig{
 			Level:    "info",
@@ -208,6 +212,12 @@ func FromEnv(config *Config) {
 	if val := os.Getenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT"); val != "" {
 		if duration, err := time.ParseDuration(val); err == nil {
 			config.Scheduler.DefaultTimeout = duration
+		}
+	}
+
+	if val := os.Getenv("MCP_CRON_POLL_INTERVAL"); val != "" {
+		if duration, err := time.ParseDuration(val); err == nil {
+			config.Scheduler.PollInterval = duration
 		}
 	}
 

@@ -25,7 +25,7 @@ internal/
   errors/              # Typed errors: NotFound, AlreadyExists, InvalidInput, Internal
   logging/             # Leveled logger (Debug/Info/Warn/Error/Fatal), file + stdout
   model/               # Core types: Task, Result, TaskType, TaskStatus, Executor, ResultStore interfaces
-  scheduler/           # Cron scheduling via robfig/cron, in-memory task storage with SQLite write-through
+  scheduler/           # Poll-based DB scheduler (robfig/cron parser only), optimistic locking for multi-instance dedup
   server/              # MCP server, tool registration, HTTP/stdio transport, handlers
   sleep/               # Platform-specific system sleep prevention (macOS, Windows)
   store/               # SQLite store (persistent task definitions + result history, schema migrations)
@@ -46,7 +46,8 @@ scripts/
 - **Handler signature**: `func (s *MCPServer) handle<Name>(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error)`
 - **Task types**: `shell_command` (runs a command) and `AI` (runs an LLM prompt)
 - **Task statuses**: pending, running, completed, failed, disabled
-- **Storage**: In-memory maps with SQLite write-through for task definitions; SQLite for persistent result history (`modernc.org/sqlite`, pure Go)
+- **Storage**: In-memory read cache refreshed from SQLite on each poll tick; SQLite is the source of truth for task definitions and result history (`modernc.org/sqlite`, pure Go)
+- **Scheduling**: Poll-based — `next_run` column in `tasks` table, polled every `PollInterval` (default 1s). Optimistic locking (`UPDATE ... WHERE next_run = :current`) prevents duplicate execution across multiple instances sharing the same DB.
 - **Transport**: SSE (HTTP, default) or stdio (for CLI/Docker integration). Stdio mode auto-exits on stdin EOF via `server.Done()` channel.
 
 ## MCP Tools Exposed
@@ -58,7 +59,7 @@ list_tasks, get_task, get_task_result, add_task, add_ai_task, update_task, remov
 - `github.com/modelcontextprotocol/go-sdk` — Official MCP Go SDK
 - `github.com/openai/openai-go` — OpenAI API client (for AI tasks)
 - `github.com/anthropics/anthropic-sdk-go` — Anthropic API client (for AI tasks)
-- `github.com/robfig/cron/v3` — Cron expression parsing and scheduling
+- `github.com/robfig/cron/v3` — Cron expression parsing (parser only, no in-memory scheduler engine)
 - `modernc.org/sqlite` — Pure-Go SQLite driver (no CGo) for persistent result history
 
 ## npm Packaging

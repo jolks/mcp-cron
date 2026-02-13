@@ -439,6 +439,233 @@ func TestSaveDuplicateTask(t *testing.T) {
 	}
 }
 
+// --- next_run and multi-instance tests ---
+
+func TestSaveTaskWithNextRun(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	nextRun := now.Add(5 * time.Minute)
+	task := &model.Task{
+		ID:        "task-nextrun",
+		Name:      "NextRun Task",
+		Type:      "shell_command",
+		Command:   "echo hello",
+		Schedule:  "*/5 * * * *",
+		Enabled:   true,
+		NextRun:   nextRun,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	tasks, err := s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].NextRun.IsZero() {
+		t.Error("expected NextRun to be set after round-trip")
+	}
+	// Compare truncated to microsecond (RFC3339Nano precision)
+	if !tasks[0].NextRun.Truncate(time.Microsecond).Equal(nextRun) {
+		t.Errorf("NextRun = %v, want %v", tasks[0].NextRun, nextRun)
+	}
+}
+
+func TestLoadTasksWithNextRun(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	// Task with next_run
+	task1 := &model.Task{
+		ID:        "with-nextrun",
+		Name:      "With NextRun",
+		Type:      "shell_command",
+		Command:   "echo 1",
+		Schedule:  "* * * * *",
+		Enabled:   true,
+		NextRun:   now.Add(time.Minute),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	// Task without next_run (disabled)
+	task2 := &model.Task{
+		ID:        "without-nextrun",
+		Name:      "Without NextRun",
+		Type:      "shell_command",
+		Command:   "echo 2",
+		Schedule:  "* * * * *",
+		Enabled:   false,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.SaveTask(task1); err != nil {
+		t.Fatalf("SaveTask 1: %v", err)
+	}
+	if err := s.SaveTask(task2); err != nil {
+		t.Fatalf("SaveTask 2: %v", err)
+	}
+
+	tasks, err := s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 2 {
+		t.Fatalf("expected 2 tasks, got %d", len(tasks))
+	}
+
+	// Find task by ID
+	var loaded1, loaded2 *model.Task
+	for _, t := range tasks {
+		switch t.ID {
+		case "with-nextrun":
+			loaded1 = t
+		case "without-nextrun":
+			loaded2 = t
+		}
+	}
+
+	if loaded1 == nil || loaded1.NextRun.IsZero() {
+		t.Error("task with next_run should have NextRun set")
+	}
+	if loaded2 == nil || !loaded2.NextRun.IsZero() {
+		t.Error("task without next_run should have zero NextRun")
+	}
+}
+
+func TestGetDueTasks(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+
+	// Past next_run (due)
+	due := &model.Task{
+		ID:        "due-task",
+		Name:      "Due Task",
+		Type:      "shell_command",
+		Command:   "echo due",
+		Schedule:  "* * * * *",
+		Enabled:   true,
+		NextRun:   now.Add(-1 * time.Minute),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	// Future next_run (not due)
+	future := &model.Task{
+		ID:        "future-task",
+		Name:      "Future Task",
+		Type:      "shell_command",
+		Command:   "echo future",
+		Schedule:  "* * * * *",
+		Enabled:   true,
+		NextRun:   now.Add(10 * time.Minute),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	// Disabled with past next_run (should not be returned)
+	disabled := &model.Task{
+		ID:        "disabled-task",
+		Name:      "Disabled Task",
+		Type:      "shell_command",
+		Command:   "echo disabled",
+		Schedule:  "* * * * *",
+		Enabled:   false,
+		NextRun:   now.Add(-1 * time.Minute),
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	// No next_run (should not be returned)
+	noNextRun := &model.Task{
+		ID:        "no-nextrun-task",
+		Name:      "No NextRun Task",
+		Type:      "shell_command",
+		Command:   "echo none",
+		Schedule:  "* * * * *",
+		Enabled:   true,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	for _, task := range []*model.Task{due, future, disabled, noNextRun} {
+		if err := s.SaveTask(task); err != nil {
+			t.Fatalf("SaveTask %s: %v", task.ID, err)
+		}
+	}
+
+	dueTasks, err := s.GetDueTasks(now)
+	if err != nil {
+		t.Fatalf("GetDueTasks: %v", err)
+	}
+
+	if len(dueTasks) != 1 {
+		t.Fatalf("expected 1 due task, got %d", len(dueTasks))
+	}
+	if dueTasks[0].ID != "due-task" {
+		t.Errorf("expected due-task, got %s", dueTasks[0].ID)
+	}
+}
+
+func TestAdvanceNextRun(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	currentNextRun := now.Add(-1 * time.Minute)
+	newNextRun := now.Add(1 * time.Minute)
+
+	task := &model.Task{
+		ID:        "advance-task",
+		Name:      "Advance Task",
+		Type:      "shell_command",
+		Command:   "echo advance",
+		Schedule:  "* * * * *",
+		Enabled:   true,
+		NextRun:   currentNextRun,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	// First call should succeed (claim)
+	claimed, err := s.AdvanceNextRun("advance-task", currentNextRun, newNextRun)
+	if err != nil {
+		t.Fatalf("AdvanceNextRun (first): %v", err)
+	}
+	if !claimed {
+		t.Error("expected first AdvanceNextRun to succeed")
+	}
+
+	// Second call with same currentNextRun should fail (already advanced)
+	claimed, err = s.AdvanceNextRun("advance-task", currentNextRun, newNextRun.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("AdvanceNextRun (second): %v", err)
+	}
+	if claimed {
+		t.Error("expected second AdvanceNextRun with stale currentNextRun to fail")
+	}
+
+	// Verify the next_run was actually updated
+	tasks, err := s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if !tasks[0].NextRun.Truncate(time.Microsecond).Equal(newNextRun) {
+		t.Errorf("NextRun = %v, want %v", tasks[0].NextRun, newNextRun)
+	}
+}
+
 func TestClosePreventsFurtherOps(t *testing.T) {
 	dbPath := filepath.Join(t.TempDir(), "close.db")
 	s, err := NewSQLiteStore(dbPath)

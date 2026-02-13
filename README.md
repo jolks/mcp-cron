@@ -9,6 +9,7 @@ Model Context Protocol (MCP) server for scheduling and managing tasks through a 
 - [Manage tasks](#available-mcp-tools) via MCP protocol
 - Task execution with command output capture
 - Task persistence across restarts (SQLite)
+- Multi-instance safe — multiple instances can share the same database without duplicate execution
 
 ## Installation
 
@@ -173,6 +174,7 @@ The following command line arguments are supported:
 | `--mcp-config-path` | Path to MCP configuration file | `~/.cursor/mcp.json` |
 | `--db-path` | Path to SQLite database for result history | `~/.mcp-cron/results.db` |
 | `--prevent-sleep` | Prevent system from sleeping while mcp-cron is running (macOS and Windows) | `false` |
+| `--poll-interval` | How often to check for due tasks | `1s` |
 
 ### Environment Variables
 
@@ -199,6 +201,7 @@ The following environment variables are supported:
 | `MCP_CRON_MCP_CONFIG_FILE_PATH` | Path to MCP configuration file | `~/.cursor/mcp.json` |
 | `MCP_CRON_STORE_DB_PATH` | Path to SQLite database for result history | `~/.mcp-cron/results.db` |
 | `MCP_CRON_PREVENT_SLEEP` | Prevent system from sleeping while mcp-cron is running (macOS and Windows) | `false` |
+| `MCP_CRON_POLL_INTERVAL` | How often to check for due tasks (Go duration format) | `1s` |
 
 ### Sleep Prevention
 
@@ -341,4 +344,4 @@ See [docs/testing.md](docs/testing.md) for the full testing guide, including int
 ## Acknowledgments
 
 - [modelcontextprotocol/go-sdk](https://github.com/modelcontextprotocol/go-sdk) - Official Go SDK for the Model Context Protocol
-- [robfig/cron](https://github.com/robfig/cron) - Cron library for Go 
+- [robfig/cron](https://github.com/robfig/cron) - Cron expression parsing for Go

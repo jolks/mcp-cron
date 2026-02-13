@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -31,6 +32,7 @@ func (m *MockTaskExecutor) Execute(ctx context.Context, task *model.Task, timeou
 func createTestConfig() *config.SchedulerConfig {
 	return &config.SchedulerConfig{
 		DefaultTimeout: 10 * time.Minute,
+		PollInterval:   100 * time.Millisecond,
 	}
 }
 
@@ -40,14 +42,8 @@ func TestNewScheduler(t *testing.T) {
 	if s == nil {
 		t.Fatal("NewScheduler() returned nil")
 	}
-	if s.cron == nil {
-		t.Error("Scheduler.cron is nil")
-	}
 	if s.tasks == nil {
 		t.Error("Scheduler.tasks is nil")
-	}
-	if s.entryIDs == nil {
-		t.Error("Scheduler.entryIDs is nil")
 	}
 }
 
@@ -88,20 +84,14 @@ func TestAddGetTask(t *testing.T) {
 		t.Errorf("Expected task name %s, got %s", task.Name, retrieved.Name)
 	}
 
-	// Verify LastRun and NextRun values
+	// Verify LastRun value (NextRun stays as-is since task is disabled)
 	if retrieved.LastRun.IsZero() {
 		t.Error("Expected LastRun to be initialized, but it's zero")
 	}
-	if retrieved.NextRun.IsZero() {
-		t.Error("Expected NextRun to be initialized, but it's zero")
-	}
 
-	// Verify LastRun and NextRun match the values we set
+	// Verify LastRun matches the value we set
 	if !retrieved.LastRun.Equal(now) {
 		t.Errorf("Expected LastRun %v, got %v", now, retrieved.LastRun)
-	}
-	if !retrieved.NextRun.Equal(now) {
-		t.Errorf("Expected NextRun %v, got %v", now, retrieved.NextRun)
 	}
 }
 
@@ -229,19 +219,6 @@ func TestUpdateTask(t *testing.T) {
 func TestEnableDisableTask(t *testing.T) {
 	cfg := createTestConfig()
 	s := NewScheduler(cfg)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Set up a mock executor
-	mockExecutor := &MockTaskExecutor{}
-	s.SetTaskExecutor(mockExecutor)
-
-	s.Start(ctx)
-	defer func() {
-		if err := s.Stop(); err != nil {
-			t.Logf("Failed to stop scheduler: %v", err)
-		}
-	}()
 
 	task := &model.Task{
 		ID:          "test-task",
@@ -267,6 +244,9 @@ func TestEnableDisableTask(t *testing.T) {
 	if !retrieved.Enabled {
 		t.Error("Task should be enabled")
 	}
+	if retrieved.NextRun.IsZero() {
+		t.Error("Expected NextRun to be set after enabling")
+	}
 
 	// Disable the task
 	err = s.DisableTask("test-task")
@@ -278,6 +258,9 @@ func TestEnableDisableTask(t *testing.T) {
 	retrieved, _ = s.GetTask("test-task")
 	if retrieved.Enabled {
 		t.Error("Task should be disabled")
+	}
+	if !retrieved.NextRun.IsZero() {
+		t.Error("Expected NextRun to be cleared after disabling")
 	}
 }
 
@@ -304,9 +287,6 @@ func TestNewTask(t *testing.T) {
 		t.Errorf("Expected UpdatedAt to be after %v, but was %v", beforeTime, task.UpdatedAt)
 	}
 
-	// LastRun and NextRun should be zero in the default case
-	// since they will be set when the task is scheduled
-
 	// Check default values
 	if task.Enabled != false {
 		t.Errorf("Expected Enabled to be false, but was %v", task.Enabled)
@@ -321,19 +301,6 @@ func TestNewTask(t *testing.T) {
 func TestCronExpressionSupport(t *testing.T) {
 	cfg := createTestConfig()
 	s := NewScheduler(cfg)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	// Set up a mock executor
-	mockExecutor := &MockTaskExecutor{}
-	s.SetTaskExecutor(mockExecutor)
-
-	s.Start(ctx)
-	defer func() {
-		if err := s.Stop(); err != nil {
-			t.Logf("Failed to stop scheduler: %v", err)
-		}
-	}()
 
 	// Test standard cron expression (every minute)
 	standardTask := &model.Task{
@@ -385,62 +352,84 @@ func TestCronExpressionSupport(t *testing.T) {
 		t.Errorf("Expected non-standard schedule '*/1 * * * * *', got %s", nonStandardRetrieved.Schedule)
 	}
 
-	// Verify both tasks are enabled
+	// Verify both tasks are enabled with NextRun set
 	if !standardRetrieved.Enabled {
 		t.Error("Standard task should be enabled")
 	}
 	if !nonStandardRetrieved.Enabled {
 		t.Error("Non-standard task should be enabled")
 	}
-
-	// Verify both tasks have entry IDs (are properly scheduled)
-	s.mu.RLock()
-	_, standardExists := s.entryIDs[standardTask.ID]
-	_, nonStandardExists := s.entryIDs[nonStandardTask.ID]
-	s.mu.RUnlock()
-
-	if !standardExists {
-		t.Error("Standard task should have an entry ID")
+	if standardRetrieved.NextRun.IsZero() {
+		t.Error("Standard task should have NextRun set")
 	}
-	if !nonStandardExists {
-		t.Error("Non-standard task should have an entry ID")
+	if nonStandardRetrieved.NextRun.IsZero() {
+		t.Error("Non-standard task should have NextRun set")
 	}
 }
 
-// TestTaskExecutorPattern tests the direct execution of tasks using the TaskExecutor interface
-func TestTaskExecutorPattern(t *testing.T) {
+// TestComputeNextRun verifies next run time computation from cron expressions
+func TestComputeNextRun(t *testing.T) {
 	cfg := createTestConfig()
 	s := NewScheduler(cfg)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	// Create a variable to track if the task was executed
-	taskExecuted := false
-	executedTaskID := ""
+	// Fix time for deterministic testing
+	fixedNow := time.Date(2024, 1, 15, 10, 30, 0, 0, time.Local)
+	s.nowFunc = func() time.Time { return fixedNow }
 
-	// Create a mock executor that records execution
+	// Every minute: next should be :31
+	nextRun, err := s.computeNextRun("* * * * *")
+	if err != nil {
+		t.Fatalf("computeNextRun: %v", err)
+	}
+	expected := time.Date(2024, 1, 15, 10, 31, 0, 0, time.Local)
+	if !nextRun.Equal(expected) {
+		t.Errorf("Expected next run %v, got %v", expected, nextRun)
+	}
+
+	// Every second: next should be 10:30:01
+	nextRun, err = s.computeNextRun("* * * * * *")
+	if err != nil {
+		t.Fatalf("computeNextRun: %v", err)
+	}
+	expected = time.Date(2024, 1, 15, 10, 30, 1, 0, time.Local)
+	if !nextRun.Equal(expected) {
+		t.Errorf("Expected next run %v, got %v", expected, nextRun)
+	}
+
+	// Invalid expression
+	_, err = s.computeNextRun("invalid")
+	if err == nil {
+		t.Error("Expected error for invalid schedule, got nil")
+	}
+}
+
+// TestTaskExecutorPattern tests the execution of tasks via the poll loop
+func TestTaskExecutorPattern(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	cfg := createTestConfig()
+
+	var taskExecuted atomic.Bool
+	var executedTaskID atomic.Value
+
 	mockExecutor := &MockTaskExecutor{
 		ExecuteFunc: func(ctx context.Context, task *model.Task, timeout time.Duration) error {
-			taskExecuted = true
-
-			// Get task ID from the task
-			executedTaskID = task.ID
+			taskExecuted.Store(true)
+			executedTaskID.Store(task.ID)
 			return nil
 		},
 	}
 
-	// Set the executor
+	s := NewScheduler(cfg)
+	s.SetTaskStore(taskStore)
 	s.SetTaskExecutor(mockExecutor)
 
-	// Start the scheduler
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.Start(ctx)
-	defer func() {
-		if err := s.Stop(); err != nil {
-			t.Logf("Failed to stop scheduler: %v", err)
-		}
-	}()
+	defer func() { _ = s.Stop() }()
 
-	// Create a task that will run immediately
+	// Create a task with an every-second schedule
+	now := time.Now()
 	task := &model.Task{
 		ID:          "test-executor-task",
 		Name:        "Test Executor Task",
@@ -449,92 +438,76 @@ func TestTaskExecutorPattern(t *testing.T) {
 		Description: "A task for testing the executor pattern",
 		Enabled:     true,
 		Status:      model.StatusPending,
+		CreatedAt:   now,
+		UpdatedAt:   now,
 	}
 
-	// Add the task
 	err := s.AddTask(task)
 	if err != nil {
 		t.Fatalf("Failed to add task: %v", err)
 	}
 
-	// Wait a moment for the task to execute
-	time.Sleep(1500 * time.Millisecond)
-
-	// Verify the task was executed
-	if !taskExecuted {
-		t.Error("Task was not executed by the TaskExecutor")
+	// Wait for the task to execute (poll interval is 100ms, task fires every second)
+	deadline := time.After(5 * time.Second)
+	for !taskExecuted.Load() {
+		select {
+		case <-deadline:
+			t.Fatal("Task was not executed within timeout")
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
 
 	// Verify the right task was executed
-	if executedTaskID != task.ID {
-		t.Errorf("Expected task ID %s, got %s", task.ID, executedTaskID)
+	if id, ok := executedTaskID.Load().(string); !ok || id != task.ID {
+		t.Errorf("Expected task ID %s, got %v", task.ID, executedTaskID.Load())
 	}
 
 	// Test error handling from TaskExecutor
-	// Set up a mock executor that returns an error
+	cancel()
+	_ = s.Stop()
+
 	errorExecutor := &MockTaskExecutor{
 		ExecuteFunc: func(ctx context.Context, task *model.Task, timeout time.Duration) error {
 			return fmt.Errorf("test error from executor")
 		},
 	}
 
-	// Reset the scheduler
-	err = s.Stop()
-	if err != nil {
-		t.Fatalf("Failed to stop scheduler: %v", err)
-	}
-	s = NewScheduler(cfg)
-	s.SetTaskExecutor(errorExecutor)
-	s.Start(ctx)
+	s2 := NewScheduler(cfg)
+	s2.SetTaskStore(taskStore)
+	s2.SetTaskExecutor(errorExecutor)
 
-	// Create a new task
-	errorTask := &model.Task{
-		ID:          "test-error-task",
-		Name:        "Test Error Task",
-		Schedule:    "* * * * * *", // Run every second
-		Command:     "echo error test",
-		Description: "A task for testing error handling",
-		Enabled:     true,
-		Status:      model.StatusPending,
+	ctx2, cancel2 := context.WithCancel(context.Background())
+	defer cancel2()
+	s2.Start(ctx2)
+	defer func() { _ = s2.Stop() }()
+
+	// Load existing tasks
+	if err := s2.LoadTasks(); err != nil {
+		t.Fatalf("LoadTasks: %v", err)
 	}
 
-	// Add the task
-	err = s.AddTask(errorTask)
-	if err != nil {
-		t.Fatalf("Failed to add error task: %v", err)
-	}
-
-	// Wait a moment for the task to execute
-	time.Sleep(1500 * time.Millisecond)
+	// Wait for task to execute and fail
+	time.Sleep(3 * time.Second)
 
 	// Get the task to verify its status was set to failed
-	retrievedTask, err := s.GetTask(errorTask.ID)
+	retrievedTask, err := s2.GetTask(task.ID)
 	if err != nil {
 		t.Fatalf("Failed to get task: %v", err)
 	}
 
-	// Verify the task status was updated to failed
 	if retrievedTask.Status != model.StatusFailed {
 		t.Errorf("Expected status %s, got %s", model.StatusFailed, retrievedTask.Status)
 	}
 }
 
-// TestMissingTaskExecutor verifies that the scheduler fails to schedule tasks if no executor is set
+// TestMissingTaskExecutor verifies behavior when no executor is set
 func TestMissingTaskExecutor(t *testing.T) {
 	cfg := createTestConfig()
 	s := NewScheduler(cfg)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
-	s.Start(ctx)
-	defer func(s *Scheduler) {
-		err := s.Stop()
-		if err != nil {
-			t.Fatalf("Failed to stop scheduler: %v", err)
-		}
-	}(s)
-
-	// Create a task
+	// Adding an enabled task should succeed (next_run is computed by parser, no executor needed)
+	// but the task won't execute without an executor
 	task := &model.Task{
 		ID:          "missing-executor-task",
 		Name:        "Missing Executor Task",
@@ -545,40 +518,36 @@ func TestMissingTaskExecutor(t *testing.T) {
 		Status:      model.StatusPending,
 	}
 
-	// Try to add the task - this should fail because we enabled the task but didn't set an executor
 	err := s.AddTask(task)
-	if err == nil {
-		t.Error("Expected AddTask to fail with no executor, but it succeeded")
+	if err != nil {
+		t.Fatalf("AddTask should succeed even without executor: %v", err)
 	}
 
-	// Now try with disabled task - this should work
-	task.ID = "missing-executor-task-2" // Use a different ID
-	task.Enabled = false
-	err = s.AddTask(task)
+	// Verify next_run was computed
+	retrieved, _ := s.GetTask("missing-executor-task")
+	if retrieved.NextRun.IsZero() {
+		t.Error("Expected NextRun to be set for enabled task")
+	}
+
+	// Disabled task should also work
+	task2 := &model.Task{
+		ID:       "missing-executor-task-2",
+		Name:     "Disabled Task",
+		Schedule: "* * * * * *",
+		Command:  "echo test",
+		Enabled:  false,
+		Status:   model.StatusPending,
+	}
+	err = s.AddTask(task2)
 	if err != nil {
 		t.Errorf("Failed to add disabled task: %v", err)
 	}
-
-	// Now try to enable it - this should fail
-	err = s.EnableTask(task.ID)
-	if err == nil {
-		t.Error("Expected EnableTask to fail with no executor, but it succeeded")
-	}
-
-	// In TestMissingTaskExecutor, update this check:
-	if task.Status != model.StatusFailed {
-		t.Errorf("Expected task status to be %s after error, got %s",
-			model.StatusFailed, task.Status)
-	}
 }
 
-// TestRemoveTaskStopsExecution verifies that after removing a task, the
-// executor is no longer called even if the cron job was in-flight.
+// TestRemoveTaskStopsExecution verifies that after removing a task, execution stops
 func TestRemoveTaskStopsExecution(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
 
 	var mu sync.Mutex
 	executionCount := 0
@@ -591,21 +560,26 @@ func TestRemoveTaskStopsExecution(t *testing.T) {
 			return nil
 		},
 	}
-	s.SetTaskExecutor(mockExecutor)
-	s.Start(ctx)
-	defer func() {
-		if err := s.Stop(); err != nil {
-			t.Logf("Failed to stop scheduler: %v", err)
-		}
-	}()
 
+	s := NewScheduler(cfg)
+	s.SetTaskStore(taskStore)
+	s.SetTaskExecutor(mockExecutor)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Start(ctx)
+	defer func() { _ = s.Stop() }()
+
+	now := time.Now()
 	task := &model.Task{
-		ID:       "remove-while-running",
-		Name:     "Remove While Running",
-		Schedule: "* * * * * *", // every second
-		Command:  "echo test",
-		Enabled:  true,
-		Status:   model.StatusPending,
+		ID:        "remove-while-running",
+		Name:      "Remove While Running",
+		Schedule:  "* * * * * *", // every second
+		Command:   "echo test",
+		Enabled:   true,
+		Status:    model.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
 	}
 
 	if err := s.AddTask(task); err != nil {
@@ -613,14 +587,21 @@ func TestRemoveTaskStopsExecution(t *testing.T) {
 	}
 
 	// Wait for at least one execution
-	time.Sleep(1500 * time.Millisecond)
-
-	mu.Lock()
-	if executionCount == 0 {
+	deadline := time.After(5 * time.Second)
+	for {
+		mu.Lock()
+		count := executionCount
 		mu.Unlock()
-		t.Fatal("expected at least one execution before removal")
+		if count > 0 {
+			break
+		}
+		select {
+		case <-deadline:
+			t.Fatal("expected at least one execution before removal")
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
 	}
-	mu.Unlock()
 
 	// Remove the task
 	if err := s.RemoveTask("remove-while-running"); err != nil {
@@ -667,9 +648,6 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	s1.SetTaskStore(taskStore)
 	s1.SetTaskExecutor(&MockTaskExecutor{})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	s1.Start(ctx)
-
 	now := time.Now()
 	shellTask := &model.Task{
 		ID:          "persist-shell",
@@ -702,18 +680,19 @@ func TestPersistenceRoundTrip(t *testing.T) {
 		t.Fatalf("AddTask ai: %v", err)
 	}
 
+	// Verify shell task has NextRun set (it's enabled)
+	got, _ := s1.GetTask("persist-shell")
+	if got.NextRun.IsZero() {
+		t.Error("enabled shell task should have NextRun set")
+	}
+
 	// Stop first scheduler
-	cancel()
 	_ = s1.Stop()
 
 	// Create second scheduler with same store, load tasks
 	s2 := NewScheduler(cfg)
 	s2.SetTaskStore(taskStore)
 	s2.SetTaskExecutor(&MockTaskExecutor{})
-
-	ctx2, cancel2 := context.WithCancel(context.Background())
-	defer cancel2()
-	s2.Start(ctx2)
 
 	if err := s2.LoadTasks(); err != nil {
 		t.Fatalf("LoadTasks: %v", err)
@@ -738,6 +717,9 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	if !got.Enabled {
 		t.Error("shell task should be enabled after reload")
 	}
+	if got.NextRun.IsZero() {
+		t.Error("enabled shell task should have NextRun after reload")
+	}
 
 	got, err = s2.GetTask("persist-ai")
 	if err != nil {
@@ -748,19 +730,6 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	}
 	if got.Enabled {
 		t.Error("AI task should be disabled after reload")
-	}
-
-	// Verify enabled task is scheduled
-	s2.mu.RLock()
-	_, shellScheduled := s2.entryIDs["persist-shell"]
-	_, aiScheduled := s2.entryIDs["persist-ai"]
-	s2.mu.RUnlock()
-
-	if !shellScheduled {
-		t.Error("enabled shell task should be scheduled after LoadTasks")
-	}
-	if aiScheduled {
-		t.Error("disabled AI task should not be scheduled after LoadTasks")
 	}
 }
 
@@ -864,10 +833,6 @@ func TestPersistenceEnableDisable(t *testing.T) {
 	s.SetTaskStore(taskStore)
 	s.SetTaskExecutor(&MockTaskExecutor{})
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	s.Start(ctx)
-
 	now := time.Now()
 	task := &model.Task{
 		ID:        "toggle-task",
@@ -885,7 +850,7 @@ func TestPersistenceEnableDisable(t *testing.T) {
 		t.Fatalf("AddTask: %v", err)
 	}
 
-	// Enable — should persist
+	// Enable — should persist with next_run
 	if err := s.EnableTask("toggle-task"); err != nil {
 		t.Fatalf("EnableTask: %v", err)
 	}
@@ -894,8 +859,11 @@ func TestPersistenceEnableDisable(t *testing.T) {
 	if !tasks[0].Enabled {
 		t.Error("expected enabled=true in DB after EnableTask")
 	}
+	if tasks[0].NextRun.IsZero() {
+		t.Error("expected next_run to be set in DB after EnableTask")
+	}
 
-	// Disable — should persist
+	// Disable — should persist with cleared next_run
 	if err := s.DisableTask("toggle-task"); err != nil {
 		t.Fatalf("DisableTask: %v", err)
 	}
@@ -903,5 +871,192 @@ func TestPersistenceEnableDisable(t *testing.T) {
 	tasks, _ = taskStore.LoadTasks()
 	if tasks[0].Enabled {
 		t.Error("expected enabled=false in DB after DisableTask")
+	}
+	if !tasks[0].NextRun.IsZero() {
+		t.Error("expected next_run to be cleared in DB after DisableTask")
+	}
+}
+
+// TestPollLoopExecutesDueTasks verifies that the poll loop picks up and executes due tasks
+func TestPollLoopExecutesDueTasks(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	cfg := createTestConfig()
+
+	var executed atomic.Bool
+
+	mockExecutor := &MockTaskExecutor{
+		ExecuteFunc: func(ctx context.Context, task *model.Task, timeout time.Duration) error {
+			executed.Store(true)
+			return nil
+		},
+	}
+
+	s := NewScheduler(cfg)
+	s.SetTaskStore(taskStore)
+	s.SetTaskExecutor(mockExecutor)
+
+	// Add a task with next_run in the past (immediately due)
+	now := time.Now()
+	task := &model.Task{
+		ID:        "due-task",
+		Name:      "Due Task",
+		Type:      model.TypeShellCommand.String(),
+		Command:   "echo due",
+		Schedule:  "* * * * * *",
+		Enabled:   true,
+		NextRun:   now.Add(-1 * time.Second), // Already due
+		Status:    model.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := taskStore.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	// Load into scheduler and start polling
+	if err := s.LoadTasks(); err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Start(ctx)
+	defer func() { _ = s.Stop() }()
+
+	// Wait for execution
+	deadline := time.After(5 * time.Second)
+	for !executed.Load() {
+		select {
+		case <-deadline:
+			t.Fatal("Task was not executed within timeout")
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
+// TestPollLoopDedup verifies that two schedulers sharing the same DB
+// execute a due task exactly once
+func TestPollLoopDedup(t *testing.T) {
+	dbPath := filepath.Join(t.TempDir(), "dedup.db")
+
+	taskStore1, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore 1: %v", err)
+	}
+	t.Cleanup(func() { _ = taskStore1.Close() })
+
+	taskStore2, err := store.NewSQLiteStore(dbPath)
+	if err != nil {
+		t.Fatalf("NewSQLiteStore 2: %v", err)
+	}
+	t.Cleanup(func() { _ = taskStore2.Close() })
+
+	cfg := createTestConfig()
+
+	var totalExecutions atomic.Int32
+
+	makeExecutor := func() *MockTaskExecutor {
+		return &MockTaskExecutor{
+			ExecuteFunc: func(ctx context.Context, task *model.Task, timeout time.Duration) error {
+				totalExecutions.Add(1)
+				return nil
+			},
+		}
+	}
+
+	// Create two schedulers sharing the same DB
+	s1 := NewScheduler(cfg)
+	s1.SetTaskStore(taskStore1)
+	s1.SetTaskExecutor(makeExecutor())
+
+	s2 := NewScheduler(cfg)
+	s2.SetTaskStore(taskStore2)
+	s2.SetTaskExecutor(makeExecutor())
+
+	// Insert a task directly into the DB with next_run in the past
+	// (bypassing AddTask which would recompute next_run)
+	now := time.Now()
+	task := &model.Task{
+		ID:        "dedup-task",
+		Name:      "Dedup Task",
+		Type:      model.TypeShellCommand.String(),
+		Command:   "echo dedup",
+		Schedule:  "0 0 1 1 *", // Yearly — won't naturally become due again soon
+		Enabled:   true,
+		NextRun:   now.Add(-1 * time.Second),
+		Status:    model.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	if err := taskStore1.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	// Load tasks into both schedulers
+	if err := s1.LoadTasks(); err != nil {
+		t.Fatalf("LoadTasks s1: %v", err)
+	}
+	if err := s2.LoadTasks(); err != nil {
+		t.Fatalf("LoadTasks s2: %v", err)
+	}
+
+	// Start both schedulers
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s1.Start(ctx)
+	s2.Start(ctx)
+	defer func() {
+		_ = s1.Stop()
+		_ = s2.Stop()
+	}()
+
+	// Wait enough time for multiple poll cycles
+	time.Sleep(2 * time.Second)
+
+	// Exactly one execution should have happened
+	count := totalExecutions.Load()
+	if count != 1 {
+		t.Errorf("Expected exactly 1 execution, got %d", count)
+	}
+}
+
+// TestNextRunPersistedOnAdd verifies that next_run is saved to DB when adding an enabled task
+func TestNextRunPersistedOnAdd(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	cfg := createTestConfig()
+
+	s := NewScheduler(cfg)
+	s.SetTaskStore(taskStore)
+
+	now := time.Now()
+	task := &model.Task{
+		ID:        "persist-nextrun",
+		Name:      "Persist NextRun",
+		Type:      model.TypeShellCommand.String(),
+		Command:   "echo test",
+		Schedule:  "*/5 * * * *",
+		Enabled:   true,
+		Status:    model.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	// Load from DB and verify next_run was persisted
+	tasks, err := taskStore.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if tasks[0].NextRun.IsZero() {
+		t.Error("expected next_run to be persisted in DB for enabled task")
 	}
 }

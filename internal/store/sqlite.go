@@ -39,6 +39,12 @@ func NewSQLiteStore(dbPath string) (*SQLiteStore, error) {
 		return nil, fmt.Errorf("enable WAL mode: %w", err)
 	}
 
+	// Set busy timeout to handle concurrent writer contention across instances.
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		_ = db.Close()
+		return nil, fmt.Errorf("set busy timeout: %w", err)
+	}
+
 	if err := runMigrations(db); err != nil {
 		_ = db.Close()
 		return nil, fmt.Errorf("run migrations: %w", err)
@@ -125,9 +131,13 @@ func (s *SQLiteStore) GetResults(taskID string, limit int) ([]*model.Result, err
 
 // SaveTask persists a new task definition.
 func (s *SQLiteStore) SaveTask(task *model.Task) error {
+	nextRun := ""
+	if !task.NextRun.IsZero() {
+		nextRun = task.NextRun.Format(timeFormat)
+	}
 	_, err := s.db.Exec(`
-		INSERT INTO tasks (id, name, description, type, command, prompt, schedule, enabled, created_at, updated_at)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		INSERT INTO tasks (id, name, description, type, command, prompt, schedule, enabled, created_at, updated_at, next_run)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
 		task.ID,
 		task.Name,
 		task.Description,
@@ -138,6 +148,7 @@ func (s *SQLiteStore) SaveTask(task *model.Task) error {
 		boolToInt(task.Enabled),
 		task.CreatedAt.Format(timeFormat),
 		task.UpdatedAt.Format(timeFormat),
+		nextRun,
 	)
 	if err != nil {
 		return fmt.Errorf("insert task: %w", err)
@@ -147,8 +158,12 @@ func (s *SQLiteStore) SaveTask(task *model.Task) error {
 
 // UpdateTask updates an existing task definition.
 func (s *SQLiteStore) UpdateTask(task *model.Task) error {
+	nextRun := ""
+	if !task.NextRun.IsZero() {
+		nextRun = task.NextRun.Format(timeFormat)
+	}
 	result, err := s.db.Exec(`
-		UPDATE tasks SET name=?, description=?, type=?, command=?, prompt=?, schedule=?, enabled=?, updated_at=?
+		UPDATE tasks SET name=?, description=?, type=?, command=?, prompt=?, schedule=?, enabled=?, updated_at=?, next_run=?
 		WHERE id=?`,
 		task.Name,
 		task.Description,
@@ -158,6 +173,7 @@ func (s *SQLiteStore) UpdateTask(task *model.Task) error {
 		task.Schedule,
 		boolToInt(task.Enabled),
 		task.UpdatedAt.Format(timeFormat),
+		nextRun,
 		task.ID,
 	)
 	if err != nil {
@@ -185,7 +201,7 @@ func (s *SQLiteStore) DeleteTask(taskID string) error {
 // LoadTasks returns all persisted task definitions.
 func (s *SQLiteStore) LoadTasks() ([]*model.Task, error) {
 	rows, err := s.db.Query(`
-		SELECT id, name, description, type, command, prompt, schedule, enabled, created_at, updated_at
+		SELECT id, name, description, type, command, prompt, schedule, enabled, created_at, updated_at, next_run
 		FROM tasks`)
 	if err != nil {
 		return nil, fmt.Errorf("query tasks: %w", err)
@@ -196,17 +212,20 @@ func (s *SQLiteStore) LoadTasks() ([]*model.Task, error) {
 	for rows.Next() {
 		var t model.Task
 		var enabled int
-		var createdStr, updatedStr string
+		var createdStr, updatedStr, nextRunStr string
 		if err := rows.Scan(
 			&t.ID, &t.Name, &t.Description, &t.Type,
 			&t.Command, &t.Prompt, &t.Schedule,
-			&enabled, &createdStr, &updatedStr,
+			&enabled, &createdStr, &updatedStr, &nextRunStr,
 		); err != nil {
 			return nil, fmt.Errorf("scan task row: %w", err)
 		}
 		t.Enabled = enabled != 0
 		t.CreatedAt, _ = time.Parse(timeFormat, createdStr)
 		t.UpdatedAt, _ = time.Parse(timeFormat, updatedStr)
+		if nextRunStr != "" {
+			t.NextRun, _ = time.Parse(timeFormat, nextRunStr)
+		}
 		t.Status = model.StatusPending
 		if !t.Enabled {
 			t.Status = model.StatusDisabled
@@ -217,6 +236,67 @@ func (s *SQLiteStore) LoadTasks() ([]*model.Task, error) {
 		return nil, fmt.Errorf("iterate task rows: %w", err)
 	}
 	return tasks, nil
+}
+
+// GetDueTasks returns all enabled tasks whose next_run is at or before the given time.
+func (s *SQLiteStore) GetDueTasks(now time.Time) ([]*model.Task, error) {
+	rows, err := s.db.Query(`
+		SELECT id, name, description, type, command, prompt, schedule, enabled, created_at, updated_at, next_run
+		FROM tasks
+		WHERE enabled = 1 AND next_run != '' AND next_run <= ?`,
+		now.Format(timeFormat))
+	if err != nil {
+		return nil, fmt.Errorf("query due tasks: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var tasks []*model.Task
+	for rows.Next() {
+		var t model.Task
+		var enabled int
+		var createdStr, updatedStr, nextRunStr string
+		if err := rows.Scan(
+			&t.ID, &t.Name, &t.Description, &t.Type,
+			&t.Command, &t.Prompt, &t.Schedule,
+			&enabled, &createdStr, &updatedStr, &nextRunStr,
+		); err != nil {
+			return nil, fmt.Errorf("scan due task row: %w", err)
+		}
+		t.Enabled = enabled != 0
+		t.CreatedAt, _ = time.Parse(timeFormat, createdStr)
+		t.UpdatedAt, _ = time.Parse(timeFormat, updatedStr)
+		if nextRunStr != "" {
+			t.NextRun, _ = time.Parse(timeFormat, nextRunStr)
+		}
+		t.Status = model.StatusPending
+		tasks = append(tasks, &t)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate due task rows: %w", err)
+	}
+	return tasks, nil
+}
+
+// AdvanceNextRun atomically advances a task's next_run using optimistic locking.
+// Returns true if the update succeeded (this instance claimed the execution),
+// false if another instance already advanced it.
+func (s *SQLiteStore) AdvanceNextRun(taskID string, currentNextRun time.Time, newNextRun time.Time) (bool, error) {
+	result, err := s.db.Exec(`
+		UPDATE tasks SET next_run = ?, updated_at = ?
+		WHERE id = ? AND next_run = ?`,
+		newNextRun.Format(timeFormat),
+		time.Now().Format(timeFormat),
+		taskID,
+		currentNextRun.Format(timeFormat),
+	)
+	if err != nil {
+		return false, fmt.Errorf("advance next_run: %w", err)
+	}
+	rows, err := result.RowsAffected()
+	if err != nil {
+		return false, fmt.Errorf("check advance result: %w", err)
+	}
+	return rows == 1, nil
 }
 
 func boolToInt(b bool) int {
