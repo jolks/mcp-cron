@@ -237,15 +237,16 @@ When running with stdio transport, logs are redirected to a `mcp-cron.log` log f
 
 The server exposes several tools through the MCP protocol:
 
-1. `list_tasks` - Lists all scheduled tasks
+1. `list_tasks` - Lists all tasks (scheduled and on-demand)
 2. `get_task` - Gets a specific task by ID
-3. `add_task` - Adds a new scheduled task
-4. `add_ai_task` - Adds a new scheduled AI (LLM) task with a prompt
+3. `add_task` - Adds a new shell command task (provide `schedule` for recurring, or omit for on-demand)
+4. `add_ai_task` - Adds a new AI (LLM) task with a prompt (provide `schedule` for recurring, or omit for on-demand)
 5. `update_task` - Updates an existing task
 6. `remove_task` - Removes a task by ID
-7. `enable_task` - Enables a disabled task
-8. `disable_task` - Disables an enabled task
-9. `get_task_result` - Gets execution results for a task (latest by default, or recent history with `limit`)
+7. `run_task` - Immediately executes a task by ID (for on-demand tasks or ad-hoc runs of scheduled tasks)
+8. `enable_task` - Enables a task so it runs on its schedule or can be triggered via `run_task`
+9. `disable_task` - Disables a task so it stops running and cannot be triggered
+10. `get_task_result` - Gets execution results for a task (latest by default, or recent history with `limit`)
 
 ### Task Format
 
@@ -273,6 +274,12 @@ For shell command tasks, use the `command` field to specify the command to execu
 For AI tasks, use the `prompt` field to specify what the AI should do.
 The `type` field can be either `shell_command` (default) or `AI`.
 
+**Scheduled vs on-demand tasks:**
+- **Scheduled**: Provide a `schedule` (cron expression) — the task runs automatically on that schedule.
+- **On-demand**: Omit `schedule` — the task sits idle until triggered via `run_task`.
+
+`run_task` also works on scheduled tasks for ad-hoc execution outside their normal schedule. After execution, scheduled tasks resume their normal schedule; on-demand tasks return to idle.
+
 ### Task Status
 
 The tasks can have the following status values:
@@ -284,7 +291,7 @@ The tasks can have the following status values:
 
 ### Cron Expression Format
 
-The scheduler uses the [github.com/robfig/cron/v3](https://github.com/robfig/cron) library for parsing cron expressions. The format includes seconds:
+Cron expressions are required for scheduled tasks and omitted for on-demand tasks. The scheduler uses the [github.com/robfig/cron/v3](https://github.com/robfig/cron) library for parsing. The format includes seconds:
 
 ```
 ┌───────────── second (0 - 59) (Optional)

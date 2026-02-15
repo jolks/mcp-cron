@@ -47,12 +47,12 @@ scripts/
 - **Task types**: `shell_command` (runs a command) and `AI` (runs an LLM prompt)
 - **Task statuses**: pending, running, completed, failed, disabled
 - **Storage**: In-memory read cache refreshed from SQLite on each poll tick; SQLite is the source of truth for task definitions and result history (`modernc.org/sqlite`, pure Go)
-- **Scheduling**: Poll-based — `next_run` column in `tasks` table, polled every `PollInterval` (default 1s). Optimistic locking (`UPDATE ... WHERE next_run = :current`) prevents duplicate execution across multiple instances sharing the same DB.
+- **Scheduling**: Poll-based — `next_run` column in `tasks` table, polled every `PollInterval` (default 1s). Optimistic locking (`UPDATE ... WHERE next_run = :current`) prevents duplicate execution across multiple instances sharing the same DB. Tasks can be **scheduled** (with a cron expression) or **on-demand** (no schedule, triggered via `run_task`).
 - **Transport**: SSE (HTTP, default) or stdio (for CLI/Docker integration). Stdio mode auto-exits on stdin EOF via `server.Done()` channel.
 
 ## MCP Tools Exposed
 
-list_tasks, get_task, get_task_result, add_task, add_ai_task, update_task, remove_task, enable_task, disable_task
+list_tasks, get_task, get_task_result, add_task, add_ai_task, update_task, remove_task, run_task, enable_task, disable_task
 
 ## Dependencies
 
