@@ -71,8 +71,8 @@ func (s *Scheduler) AddTask(task *model.Task) error {
 		return errors.AlreadyExists("task", task.ID)
 	}
 
-	// Compute next_run for enabled tasks
-	if task.Enabled {
+	// Compute next_run for enabled tasks with a schedule
+	if task.Enabled && task.Schedule != "" {
 		nextRun, err := s.computeNextRun(task.Schedule)
 		if err != nil {
 			task.Status = model.StatusFailed
@@ -131,17 +131,20 @@ func (s *Scheduler) EnableTask(taskID string) error {
 		return nil // Already enabled
 	}
 
-	// Compute next_run
-	nextRun, err := s.computeNextRun(task.Schedule)
-	if err != nil {
-		task.Status = model.StatusFailed
-		return err
-	}
-
 	task.Enabled = true
-	task.NextRun = nextRun
 	task.Status = model.StatusPending
 	task.UpdatedAt = s.now()
+
+	// Compute next_run for scheduled tasks only
+	if task.Schedule != "" {
+		nextRun, err := s.computeNextRun(task.Schedule)
+		if err != nil {
+			task.Enabled = false // rollback
+			task.Status = model.StatusFailed
+			return err
+		}
+		task.NextRun = nextRun
+	}
 
 	// Persist to store
 	if s.taskStore != nil {
@@ -219,15 +222,17 @@ func (s *Scheduler) UpdateTask(task *model.Task) error {
 		return errors.NotFound("task", task.ID)
 	}
 
-	// Recompute next_run if enabled
-	if task.Enabled {
+	// Recompute next_run if enabled and has a schedule
+	if task.Enabled && task.Schedule != "" {
 		nextRun, err := s.computeNextRun(task.Schedule)
 		if err != nil {
 			return err
 		}
 		task.NextRun = nextRun
-	} else {
+	} else if !task.Enabled {
 		task.NextRun = time.Time{} // Clear next_run for disabled tasks
+	} else {
+		task.NextRun = time.Time{} // On-demand task: no schedule, clear next_run
 	}
 
 	// Update the task
@@ -238,6 +243,35 @@ func (s *Scheduler) UpdateTask(task *model.Task) error {
 	if s.taskStore != nil {
 		if err := s.taskStore.UpdateTask(task); err != nil {
 			return fmt.Errorf("persist task update: %w", err)
+		}
+	}
+
+	return nil
+}
+
+// RunTaskNow triggers immediate execution of a task by setting its next_run to now.
+// The poll loop picks it up on the next tick (≤PollInterval). After execution,
+// scheduled tasks resume their normal schedule; on-demand tasks go back to idle.
+func (s *Scheduler) RunTaskNow(taskID string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	task, exists := s.tasks[taskID]
+	if !exists {
+		return errors.NotFound("task", taskID)
+	}
+
+	if !task.Enabled {
+		return errors.InvalidInput("cannot run disabled task; enable it first")
+	}
+
+	now := s.now()
+	task.NextRun = now
+
+	// Persist to store so the poll loop's GetDueTasks picks it up
+	if s.taskStore != nil {
+		if err := s.taskStore.UpdateTask(task); err != nil {
+			return fmt.Errorf("persist run_task_now: %w", err)
 		}
 	}
 
@@ -277,8 +311,8 @@ func (s *Scheduler) LoadTasks() error {
 			continue // skip duplicates
 		}
 		s.tasks[task.ID] = task
-		// Compute next_run for enabled tasks that don't have one
-		if task.Enabled && task.NextRun.IsZero() {
+		// Compute next_run for enabled scheduled tasks that don't have one
+		if task.Enabled && task.NextRun.IsZero() && task.Schedule != "" {
 			nextRun, err := s.computeNextRun(task.Schedule)
 			if err != nil {
 				task.Status = model.StatusFailed
@@ -375,11 +409,15 @@ func (s *Scheduler) pollTick() {
 	}
 
 	for _, task := range dueTasks {
-		// Compute next_run from schedule
-		newNextRun, err := s.computeNextRun(task.Schedule)
-		if err != nil {
-			fmt.Printf("Poll: failed to compute next_run for task %s: %v\n", task.ID, err)
-			continue
+		// Compute next_run from schedule (on-demand tasks go back to idle)
+		var newNextRun time.Time
+		if task.Schedule != "" {
+			var err error
+			newNextRun, err = s.computeNextRun(task.Schedule)
+			if err != nil {
+				fmt.Printf("Poll: failed to compute next_run for task %s: %v\n", task.ID, err)
+				continue
+			}
 		}
 
 		// Optimistic lock: try to claim this execution

@@ -281,10 +281,14 @@ func (s *SQLiteStore) GetDueTasks(now time.Time) ([]*model.Task, error) {
 // Returns true if the update succeeded (this instance claimed the execution),
 // false if another instance already advanced it.
 func (s *SQLiteStore) AdvanceNextRun(taskID string, currentNextRun time.Time, newNextRun time.Time) (bool, error) {
+	newNextRunStr := ""
+	if !newNextRun.IsZero() {
+		newNextRunStr = newNextRun.Format(timeFormat)
+	}
 	result, err := s.db.Exec(`
 		UPDATE tasks SET next_run = ?, updated_at = ?
 		WHERE id = ? AND next_run = ?`,
-		newNextRun.Format(timeFormat),
+		newNextRunStr,
 		time.Now().Format(timeFormat),
 		taskID,
 		currentNextRun.Format(timeFormat),

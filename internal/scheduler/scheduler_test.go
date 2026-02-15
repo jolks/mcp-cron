@@ -1060,3 +1060,275 @@ func TestNextRunPersistedOnAdd(t *testing.T) {
 		t.Error("expected next_run to be persisted in DB for enabled task")
 	}
 }
+
+// --- On-demand task tests ---
+
+func TestAddOnDemandTask(t *testing.T) {
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
+
+	task := &model.Task{
+		ID:      "on-demand-1",
+		Name:    "On-Demand Task",
+		Command: "echo hello",
+		Enabled: true,
+		Status:  model.StatusPending,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	retrieved, err := s.GetTask("on-demand-1")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+
+	// On-demand task should have zero NextRun even when enabled
+	if !retrieved.NextRun.IsZero() {
+		t.Error("expected zero NextRun for on-demand task")
+	}
+	if !retrieved.Enabled {
+		t.Error("expected on-demand task to be enabled")
+	}
+}
+
+func TestEnableOnDemandTask(t *testing.T) {
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
+
+	task := &model.Task{
+		ID:      "on-demand-enable",
+		Name:    "On-Demand Enable",
+		Command: "echo hello",
+		Enabled: false,
+		Status:  model.StatusPending,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	if err := s.EnableTask("on-demand-enable"); err != nil {
+		t.Fatalf("EnableTask: %v", err)
+	}
+
+	retrieved, _ := s.GetTask("on-demand-enable")
+	if !retrieved.Enabled {
+		t.Error("expected task to be enabled")
+	}
+	if retrieved.Status != model.StatusPending {
+		t.Errorf("expected status %s, got %s", model.StatusPending, retrieved.Status)
+	}
+	// On-demand task should still have zero NextRun after enable
+	if !retrieved.NextRun.IsZero() {
+		t.Error("expected zero NextRun for on-demand task after enable")
+	}
+}
+
+func TestUpdateOnDemandTask(t *testing.T) {
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
+
+	task := &model.Task{
+		ID:      "on-demand-update",
+		Name:    "On-Demand Update",
+		Command: "echo old",
+		Enabled: true,
+		Status:  model.StatusPending,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	updated := &model.Task{
+		ID:      "on-demand-update",
+		Name:    "Updated On-Demand",
+		Command: "echo new",
+		Enabled: true,
+		Status:  model.StatusPending,
+	}
+
+	if err := s.UpdateTask(updated); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+
+	retrieved, _ := s.GetTask("on-demand-update")
+	if retrieved.Name != "Updated On-Demand" {
+		t.Errorf("expected name 'Updated On-Demand', got %s", retrieved.Name)
+	}
+	if !retrieved.NextRun.IsZero() {
+		t.Error("expected zero NextRun for on-demand task after update")
+	}
+}
+
+func TestRunTaskNow(t *testing.T) {
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
+
+	// On-demand task
+	task := &model.Task{
+		ID:      "run-now-1",
+		Name:    "Run Now",
+		Command: "echo hello",
+		Enabled: true,
+		Status:  model.StatusPending,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	// RunTaskNow should set NextRun
+	if err := s.RunTaskNow("run-now-1"); err != nil {
+		t.Fatalf("RunTaskNow: %v", err)
+	}
+
+	retrieved, _ := s.GetTask("run-now-1")
+	if retrieved.NextRun.IsZero() {
+		t.Error("expected NextRun to be set after RunTaskNow")
+	}
+}
+
+func TestRunTaskNowDisabledFails(t *testing.T) {
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
+
+	task := &model.Task{
+		ID:      "run-now-disabled",
+		Name:    "Disabled Task",
+		Command: "echo hello",
+		Enabled: false,
+		Status:  model.StatusPending,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	err := s.RunTaskNow("run-now-disabled")
+	if err == nil {
+		t.Error("expected error when running disabled task, got nil")
+	}
+}
+
+func TestRunTaskNowNotFound(t *testing.T) {
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
+
+	err := s.RunTaskNow("nonexistent")
+	if err == nil {
+		t.Error("expected error for nonexistent task, got nil")
+	}
+}
+
+func TestRunTaskNowScheduledTask(t *testing.T) {
+	cfg := createTestConfig()
+	s := NewScheduler(cfg)
+
+	task := &model.Task{
+		ID:       "run-now-scheduled",
+		Name:     "Scheduled Task",
+		Schedule: "0 0 1 1 *", // yearly
+		Command:  "echo hello",
+		Enabled:  true,
+		Status:   model.StatusPending,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	// Should have a future NextRun from the schedule
+	retrieved, _ := s.GetTask("run-now-scheduled")
+	originalNextRun := retrieved.NextRun
+	if originalNextRun.IsZero() {
+		t.Fatal("expected non-zero NextRun for scheduled task")
+	}
+
+	// RunTaskNow should override NextRun to now
+	if err := s.RunTaskNow("run-now-scheduled"); err != nil {
+		t.Fatalf("RunTaskNow: %v", err)
+	}
+
+	retrieved, _ = s.GetTask("run-now-scheduled")
+	if retrieved.NextRun.After(time.Now().Add(1 * time.Second)) {
+		t.Error("expected NextRun to be approximately now after RunTaskNow")
+	}
+}
+
+func TestOnDemandTaskPollExecution(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	cfg := createTestConfig()
+
+	var executed atomic.Bool
+
+	mockExecutor := &MockTaskExecutor{
+		ExecuteFunc: func(ctx context.Context, task *model.Task, timeout time.Duration) error {
+			executed.Store(true)
+			return nil
+		},
+	}
+
+	s := NewScheduler(cfg)
+	s.SetTaskStore(taskStore)
+	s.SetTaskExecutor(mockExecutor)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Start(ctx)
+	defer func() { _ = s.Stop() }()
+
+	// Add an on-demand task (no schedule)
+	now := time.Now()
+	task := &model.Task{
+		ID:        "on-demand-poll",
+		Name:      "On-Demand Poll",
+		Type:      model.TypeShellCommand.String(),
+		Command:   "echo on-demand",
+		Enabled:   true,
+		Status:    model.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	// Task should NOT execute on its own (no schedule)
+	time.Sleep(500 * time.Millisecond)
+	if executed.Load() {
+		t.Fatal("on-demand task should not execute without RunTaskNow")
+	}
+
+	// Trigger via RunTaskNow
+	if err := s.RunTaskNow("on-demand-poll"); err != nil {
+		t.Fatalf("RunTaskNow: %v", err)
+	}
+
+	// Wait for the poll loop to pick it up and execute
+	deadline := time.After(5 * time.Second)
+	for !executed.Load() {
+		select {
+		case <-deadline:
+			t.Fatal("Task was not executed within timeout after RunTaskNow")
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+
+	// After execution, on-demand task should go back to idle (zero NextRun in DB)
+	time.Sleep(300 * time.Millisecond) // let poll loop settle
+	tasks, err := taskStore.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected 1 task, got %d", len(tasks))
+	}
+	if !tasks[0].NextRun.IsZero() {
+		t.Error("expected on-demand task to have zero NextRun after execution")
+	}
+}

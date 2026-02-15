@@ -127,28 +127,28 @@ func TestHandleAddAITask_AI(t *testing.T) {
 		t.Fatal("Result should be nil for request with missing name")
 	}
 
-	// Test case 4: Missing required fields (schedule)
-	missingScheduleTask := AITaskParams{
+	// Test case 4: Missing schedule creates an on-demand task (should succeed)
+	onDemandTask := AITaskParams{
 		TaskParams: TaskParams{
-			Name: "Missing Schedule Task",
+			Name: "On-Demand AI Task",
 		},
 		Prompt: "Generate a report on system health",
 	}
 
-	missingScheduleRequestJSON, _ := json.Marshal(missingScheduleTask)
-	missingScheduleRequest := &mcp.CallToolRequest{
+	onDemandRequestJSON, _ := json.Marshal(onDemandTask)
+	onDemandRequest := &mcp.CallToolRequest{
 		Params: &mcp.CallToolParamsRaw{
-			Arguments: json.RawMessage(missingScheduleRequestJSON),
+			Arguments: json.RawMessage(onDemandRequestJSON),
 		},
 	}
 
-	// Call the handler
-	result, err = server.handleAddAITask(context.Background(), missingScheduleRequest)
-	if err == nil {
-		t.Fatal("Request with missing schedule should fail")
+	// Call the handler — should succeed (on-demand task)
+	result, err = server.handleAddAITask(context.Background(), onDemandRequest)
+	if err != nil {
+		t.Fatalf("On-demand AI task should succeed: %v", err)
 	}
-	if result != nil {
-		t.Fatal("Result should be nil for request with missing schedule")
+	if result == nil {
+		t.Fatal("Result should not be nil for on-demand AI task")
 	}
 }
 

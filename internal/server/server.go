@@ -30,7 +30,7 @@ var osOpenFile = os.OpenFile
 type TaskParams struct {
 	ID          string `json:"id,omitempty" description:"task ID"`
 	Name        string `json:"name" description:"task name (required)"`
-	Schedule    string `json:"schedule" description:"cron expression (second optional): e.g. '*/5 * * * *' (every 5 min), '0 9 * * MON-FRI' (weekdays 9am), '@every 30s', '@hourly', '@daily' (required)"`
+	Schedule    string `json:"schedule,omitempty" description:"cron expression for recurring execution (e.g. '*/5 * * * *', '@hourly'). Omit to create an on-demand task triggered via run_task."`
 	Type        string `json:"type,omitempty" description:"task type: 'shell_command' or 'AI'"`
 	Command     string `json:"command,omitempty" description:"shell command to execute (required for shell_command tasks)"`
 	Description string `json:"description,omitempty" description:"task description"`
@@ -293,7 +293,7 @@ func (s *MCPServer) handleAddTask(_ context.Context, request *mcp.CallToolReques
 	}
 
 	// Validate parameters
-	if err := validateShellTaskParams(params.Name, params.Schedule, params.Command); err != nil {
+	if err := validateShellTaskParams(params.Name, params.Command); err != nil {
 		return createErrorResponse(err)
 	}
 
@@ -321,7 +321,7 @@ func (s *MCPServer) handleAddAITask(_ context.Context, request *mcp.CallToolRequ
 	}
 
 	// Validate parameters
-	if err := validateAITaskParams(params.Name, params.Schedule, params.Prompt); err != nil {
+	if err := validateAITaskParams(params.Name, params.Prompt); err != nil {
 		return createErrorResponse(err)
 	}
 
@@ -494,6 +494,24 @@ func (s *MCPServer) handleDisableTask(_ context.Context, request *mcp.CallToolRe
 	}
 
 	return createTaskResponse(task)
+}
+
+// handleRunTask triggers immediate execution of a task
+func (s *MCPServer) handleRunTask(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	// Extract task ID
+	taskID, err := extractTaskIDParam(request)
+	if err != nil {
+		return createErrorResponse(err)
+	}
+
+	s.logger.Debugf("Handling run_task request for task %s", taskID)
+
+	// Trigger immediate execution
+	if err := s.scheduler.RunTaskNow(taskID); err != nil {
+		return createErrorResponse(err)
+	}
+
+	return createSuccessResponse(fmt.Sprintf("Task %s triggered for immediate execution", taskID))
 }
 
 // handleGetTaskResult returns execution results for a task

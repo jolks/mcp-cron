@@ -30,7 +30,7 @@ func (s *MCPServer) registerToolsDeclarative() {
 	tools := []ToolDefinition{
 		{
 			Name:        "list_tasks",
-			Description: "Lists all scheduled tasks",
+			Description: "Lists all tasks (scheduled and on-demand)",
 			Handler:     s.handleListTasks,
 			Parameters:  struct{}{},
 		},
@@ -42,13 +42,13 @@ func (s *MCPServer) registerToolsDeclarative() {
 		},
 		{
 			Name:        "add_task",
-			Description: "Adds a new scheduled shell command task. Requires 'name', 'schedule', and 'command'. Set 'enabled' to true to activate immediately.",
+			Description: "Adds a new shell command task. Requires 'name' and 'command'. Provide 'schedule' for recurring execution or omit it to create an on-demand task triggered via run_task. Set 'enabled' to true to activate immediately.",
 			Handler:     s.handleAddTask,
 			Parameters:  TaskParams{},
 		},
 		{
 			Name:        "add_ai_task",
-			Description: "Adds a new scheduled AI (LLM) task. Requires 'name', 'schedule', and 'prompt'. The prompt specifies what the AI should do when the task runs. Set 'enabled' to true to activate immediately.",
+			Description: "Adds a new AI (LLM) task. Requires 'name' and 'prompt'. Provide 'schedule' for recurring execution or omit it to create an on-demand task triggered via run_task. Set 'enabled' to true to activate immediately.",
 			Handler:     s.handleAddAITask,
 			Parameters:  AITaskParams{},
 		},
@@ -65,14 +65,20 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Parameters:  TaskIDParams{},
 		},
 		{
+			Name:        "run_task",
+			Description: "Immediately executes a task by ID. Use this to trigger on-demand tasks (created without a schedule) or to manually run a scheduled task outside its normal schedule. The task executes within ~1 second.",
+			Handler:     s.handleRunTask,
+			Parameters:  TaskIDParams{},
+		},
+		{
 			Name:        "enable_task",
-			Description: "Enables a disabled task so it runs on its schedule",
+			Description: "Enables a task so it runs on its schedule or can be triggered via run_task",
 			Handler:     s.handleEnableTask,
 			Parameters:  TaskIDParams{},
 		},
 		{
 			Name:        "disable_task",
-			Description: "Disables a task so it stops running on its schedule but is not removed",
+			Description: "Disables a task so it stops running and cannot be triggered",
 			Handler:     s.handleDisableTask,
 			Parameters:  TaskIDParams{},
 		},

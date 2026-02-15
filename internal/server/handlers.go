@@ -126,16 +126,16 @@ func createResultsResponse(results []*model.Result) (*mcp.CallToolResult, error)
 }
 
 // validateTaskParams validates the common task parameters
-func validateTaskParams(name, schedule string) error {
-	if name == "" || schedule == "" {
-		return errors.InvalidInput("missing required fields: name and schedule are required")
+func validateTaskParams(name string) error {
+	if name == "" {
+		return errors.InvalidInput("missing required field: name is required")
 	}
 	return nil
 }
 
 // validateShellTaskParams validates the parameters specific to shell tasks
-func validateShellTaskParams(name, schedule, command string) error {
-	if err := validateTaskParams(name, schedule); err != nil {
+func validateShellTaskParams(name, command string) error {
+	if err := validateTaskParams(name); err != nil {
 		return err
 	}
 
@@ -147,8 +147,8 @@ func validateShellTaskParams(name, schedule, command string) error {
 }
 
 // validateAITaskParams validates the parameters specific to AI tasks
-func validateAITaskParams(name, schedule, prompt string) error {
-	if err := validateTaskParams(name, schedule); err != nil {
+func validateAITaskParams(name, prompt string) error {
+	if err := validateTaskParams(name); err != nil {
 		return err
 	}
 
