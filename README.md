@@ -9,7 +9,7 @@ Model Context Protocol (MCP) server for scheduling and managing tasks through a 
 - [Manage tasks](#available-mcp-tools) via MCP protocol
 - Task execution with command output capture
 - Task persistence across restarts (SQLite)
-- Multi-instance safe — multiple instances can share the same database without duplicate execution
+- Multi-instance safe — multiple instances can share the same database without duplicate execution. If you need isolated instances instead, use a different `--db-path` for each.
 
 ## Installation
 
