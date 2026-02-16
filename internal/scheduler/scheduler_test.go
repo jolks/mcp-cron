@@ -1258,6 +1258,83 @@ func TestRunTaskNowScheduledTask(t *testing.T) {
 	}
 }
 
+// TestStopWaitsForInFlightTasks verifies that Stop() blocks until running
+// task goroutines complete, ensuring results are persisted before shutdown.
+func TestStopWaitsForInFlightTasks(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	cfg := createTestConfig()
+
+	executionStarted := make(chan struct{})
+	var executionFinished atomic.Bool
+
+	mockExecutor := &MockTaskExecutor{
+		ExecuteFunc: func(ctx context.Context, task *model.Task, timeout time.Duration) error {
+			close(executionStarted)
+			time.Sleep(500 * time.Millisecond) // Simulate slow task
+			executionFinished.Store(true)
+			return nil
+		},
+	}
+
+	s := NewScheduler(cfg)
+	s.SetTaskStore(taskStore)
+	s.SetTaskExecutor(mockExecutor)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	s.Start(ctx)
+
+	// Add an on-demand task and trigger it
+	now := time.Now()
+	task := &model.Task{
+		ID:        "inflight-task",
+		Name:      "In-Flight Task",
+		Type:      model.TypeShellCommand.String(),
+		Command:   "echo slow",
+		Enabled:   true,
+		Status:    model.StatusPending,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+
+	if err := s.AddTask(task); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+	if err := s.RunTaskNow("inflight-task"); err != nil {
+		t.Fatalf("RunTaskNow: %v", err)
+	}
+
+	// Wait for the executor to start running
+	select {
+	case <-executionStarted:
+	case <-time.After(5 * time.Second):
+		t.Fatal("task execution did not start within timeout")
+	}
+
+	// Task is now running. Call Stop() — it should block until the task finishes.
+	if executionFinished.Load() {
+		t.Fatal("task finished before Stop was called; increase sleep duration")
+	}
+
+	if err := s.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+
+	// After Stop returns, the task must have completed
+	if !executionFinished.Load() {
+		t.Error("Stop() returned before in-flight task finished")
+	}
+
+	// Verify the task status was updated (proves executeTask ran to completion)
+	retrieved, err := s.GetTask("inflight-task")
+	if err != nil {
+		t.Fatalf("GetTask: %v", err)
+	}
+	if retrieved.Status != model.StatusCompleted {
+		t.Errorf("expected status %s after Stop, got %s", model.StatusCompleted, retrieved.Status)
+	}
+}
+
 func TestOnDemandTaskPollExecution(t *testing.T) {
 	taskStore := newTestStoreForScheduler(t)
 	cfg := createTestConfig()

@@ -25,6 +25,7 @@ type Scheduler struct {
 	taskStore    model.TaskStore
 	config       *config.SchedulerConfig
 	stopPoll     chan struct{}
+	taskWg       sync.WaitGroup // tracks in-flight task goroutines
 	// nowFunc allows tests to override time.Now
 	nowFunc func() time.Time
 }
@@ -51,7 +52,7 @@ func (s *Scheduler) Start(ctx context.Context) {
 	go s.pollLoop(ctx)
 }
 
-// Stop halts the scheduler
+// Stop halts the scheduler and waits for in-flight task executions to finish.
 func (s *Scheduler) Stop() error {
 	select {
 	case <-s.stopPoll:
@@ -59,6 +60,8 @@ func (s *Scheduler) Stop() error {
 	default:
 		close(s.stopPoll)
 	}
+	// Wait for all running task goroutines to complete so results are persisted.
+	s.taskWg.Wait()
 	return nil
 }
 
@@ -438,13 +441,15 @@ func (s *Scheduler) pollTick() {
 		}
 		s.mu.Unlock()
 
-		// Execute in a goroutine
+		// Execute in a goroutine (tracked by taskWg so Stop waits for completion)
+		s.taskWg.Add(1)
 		go s.executeTask(task)
 	}
 }
 
 // executeTask runs a single task execution.
 func (s *Scheduler) executeTask(task *model.Task) {
+	defer s.taskWg.Done()
 	s.mu.RLock()
 	executor := s.taskExecutor
 	s.mu.RUnlock()

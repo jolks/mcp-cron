@@ -229,13 +229,6 @@ func (s *MCPServer) Stop() error {
 		}
 	}
 
-	// Close the result store
-	if s.resultStore != nil {
-		if err := s.resultStore.Close(); err != nil {
-			s.logger.Warnf("Error closing result store: %v", err)
-		}
-	}
-
 	// Only close stopCh if it hasn't been closed yet
 	select {
 	case <-s.stopCh:

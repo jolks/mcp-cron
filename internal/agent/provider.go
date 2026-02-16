@@ -30,6 +30,7 @@ type Message struct {
 // with any LLM provider.
 type ChatProvider interface {
 	// CreateCompletion sends a chat completion request and returns the
-	// assistant's response message.
-	CreateCompletion(ctx context.Context, model string, messages []Message, tools []ToolDefinition) (*Message, error)
+	// assistant's response message. systemMsg is an optional system-level
+	// instruction prepended to the conversation (empty string to omit).
+	CreateCompletion(ctx context.Context, model string, systemMsg string, messages []Message, tools []ToolDefinition) (*Message, error)
 }

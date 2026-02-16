@@ -20,13 +20,18 @@ func NewAnthropicProvider(apiKey string) *AnthropicProvider {
 	return &AnthropicProvider{client: &client}
 }
 
-func (p *AnthropicProvider) CreateCompletion(ctx context.Context, model string, messages []Message, tools []ToolDefinition) (*Message, error) {
+func (p *AnthropicProvider) CreateCompletion(ctx context.Context, model string, systemMsg string, messages []Message, tools []ToolDefinition) (*Message, error) {
 	antMsgs := toAnthropicMessages(messages)
 
 	params := anthropic.MessageNewParams{
 		Model:     anthropic.Model(model),
 		Messages:  antMsgs,
 		MaxTokens: 4096,
+	}
+	if systemMsg != "" {
+		params.System = []anthropic.TextBlockParam{
+			{Text: systemMsg},
+		}
 	}
 	if len(tools) > 0 {
 		params.Tools = toAnthropicTools(tools)

@@ -229,6 +229,13 @@ func (a *Application) Stop() error {
 	}
 	a.logger.Infof("MCP server stopped")
 
+	// Close the result store last, after all components that use it have stopped
+	if a.resultStore != nil {
+		if err := a.resultStore.Close(); err != nil {
+			a.logger.Warnf("Error closing result store: %v", err)
+		}
+	}
+
 	// Release sleep prevention
 	if a.releaseSleep != nil {
 		a.releaseSleep()
@@ -250,11 +257,13 @@ func waitForShutdown(cancel context.CancelFunc, app *Application) {
 		app.logger.Infof("Server transport exited, shutting down...")
 	}
 
-	// Cancel the context to initiate shutdown
+	// Cancel the context to stop the poll loop from scheduling new tasks
 	cancel()
 
-	// Stop the application with a timeout
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+	// Stop the application. The scheduler waits for in-flight tasks to finish
+	// (bounded by each task's own timeout, default 10 minutes), so we use a
+	// generous outer deadline.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 11*time.Minute)
 	defer shutdownCancel()
 
 	shutdownDone := make(chan struct{})

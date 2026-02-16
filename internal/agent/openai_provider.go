@@ -28,8 +28,11 @@ func NewOpenAIProvider(apiKey string, baseURL string) *OpenAIProvider {
 	return &OpenAIProvider{client: &client}
 }
 
-func (p *OpenAIProvider) CreateCompletion(ctx context.Context, model string, messages []Message, tools []ToolDefinition) (*Message, error) {
-	oaiMsgs := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages))
+func (p *OpenAIProvider) CreateCompletion(ctx context.Context, model string, systemMsg string, messages []Message, tools []ToolDefinition) (*Message, error) {
+	oaiMsgs := make([]openai.ChatCompletionMessageParamUnion, 0, len(messages)+1)
+	if systemMsg != "" {
+		oaiMsgs = append(oaiMsgs, openai.SystemMessage(systemMsg))
+	}
 	for _, m := range messages {
 		oaiMsgs = append(oaiMsgs, toOpenAIMessage(m))
 	}

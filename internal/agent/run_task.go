@@ -12,6 +12,35 @@ import (
 	"github.com/jolks/mcp-cron/internal/model"
 )
 
+// buildSystemMessage constructs a system prompt that tells the model about its
+// task identity, how to retrieve previous results, and the MCP namespace mapping.
+// The most important instructions (task ID + get_task_result) come first, before
+// the full tool list, so they aren't lost in a long list of tools.
+func buildSystemMessage(taskID string, tools []ToolDefinition, hasResultStore bool) string {
+	if len(tools) == 0 {
+		return ""
+	}
+
+	var sb strings.Builder
+	sb.WriteString("You are an AI assistant executing a scheduled task.")
+	if taskID != "" {
+		sb.WriteString(" Your task ID is \"")
+		sb.WriteString(taskID)
+		sb.WriteString("\".")
+	}
+
+	// Put the key get_task_result instruction FIRST, before the tool list,
+	// so it isn't buried after dozens of tool descriptions.
+	if hasResultStore && taskID != "" {
+		sb.WriteString("\n\nYou have a tool called \"get_task_result\" that retrieves output from previous executions. To get your own previous results, call it with id=\"")
+		sb.WriteString(taskID)
+		sb.WriteString("\". Use limit > 1 for multiple past results.")
+	}
+
+	sb.WriteString("\n\nIf the task references tools with MCP namespace prefixes (e.g. \"mcp__cron__get_task_result\"), use the matching tool by stripping the prefix.")
+	return sb.String()
+}
+
 // newChatProvider builds the appropriate ChatProvider based on cfg.AI.Provider.
 func newChatProvider(cfg *config.Config) (ChatProvider, error) {
 	provider := strings.ToLower(cfg.AI.Provider)
@@ -140,6 +169,11 @@ func RunTask(ctx context.Context, t *model.Task, cfg *config.Config, resultStore
 		return "", err
 	}
 
+	// Build system message listing available tools and namespace mapping
+	systemMsg := buildSystemMessage(t.ID, tools, resultStore != nil)
+	logger.Infof("System message length: %d chars, tools: %d, resultStore: %v", len(systemMsg), len(tools), resultStore != nil)
+	logger.Debugf("System message:\n%s", systemMsg)
+
 	msgs := []Message{
 		{Role: "user", Content: t.Prompt},
 	}
@@ -147,7 +181,7 @@ func RunTask(ctx context.Context, t *model.Task, cfg *config.Config, resultStore
 	// Fallback to LLM if no tools
 	if len(tools) == 0 {
 		logger.Infof("No tools available, using basic chat completion")
-		resp, err := provider.CreateCompletion(ctx, cfg.AI.Model, msgs, nil)
+		resp, err := provider.CreateCompletion(ctx, cfg.AI.Model, "", msgs, nil)
 		if err != nil {
 			logger.Errorf("Chat completion failed: %v", err)
 			return "", err
@@ -162,7 +196,7 @@ func RunTask(ctx context.Context, t *model.Task, cfg *config.Config, resultStore
 
 	for i := 0; i < maxIterations; i++ {
 		logger.Debugf("AI task iteration %d", i+1)
-		resp, err := provider.CreateCompletion(ctx, cfg.AI.Model, msgs, tools)
+		resp, err := provider.CreateCompletion(ctx, cfg.AI.Model, systemMsg, msgs, tools)
 		if err != nil {
 			logger.Errorf("Chat completion failed on iteration %d: %v", i+1, err)
 			return "", err

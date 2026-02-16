@@ -282,6 +282,155 @@ func TestRunTaskIntegrationAnthropic(t *testing.T) {
 	t.Logf("Anthropic API response: %s", output)
 }
 
+// mockResultStore is a simple in-memory ResultStore for testing.
+type mockResultStore struct {
+	results map[string][]*model.Result
+}
+
+func newMockResultStore() *mockResultStore {
+	return &mockResultStore{results: make(map[string][]*model.Result)}
+}
+
+func (m *mockResultStore) SaveResult(result *model.Result) error {
+	m.results[result.TaskID] = append(m.results[result.TaskID], result)
+	return nil
+}
+
+func (m *mockResultStore) GetLatestResult(taskID string) (*model.Result, error) {
+	rs := m.results[taskID]
+	if len(rs) == 0 {
+		return nil, nil
+	}
+	return rs[len(rs)-1], nil
+}
+
+func (m *mockResultStore) GetResults(taskID string, limit int) ([]*model.Result, error) {
+	rs := m.results[taskID]
+	if limit > 0 && limit < len(rs) {
+		return rs[len(rs)-limit:], nil
+	}
+	return rs, nil
+}
+
+func (m *mockResultStore) Close() error { return nil }
+
+// TestRunTaskIntegration_InternalGetTaskResult_MCPNamespace verifies that
+// the AI model can discover and use the internal get_task_result tool via
+// the system message alone — the prompt does NOT mention the tool name or
+// the task ID. The model must learn both from the system message.
+func TestRunTaskIntegration_InternalGetTaskResult_MCPNamespace(t *testing.T) {
+	if os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS") != "true" {
+		t.Skip("Skipping OpenAI integration test. Set MCP_CRON_ENABLE_OPENAI_TESTS=true to run.")
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.AI.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
+	if cfg.AI.OpenAIAPIKey == "" {
+		t.Skip("OPENAI_API_KEY environment variable not set")
+	}
+
+	// Use realistic opaque task IDs (production IDs are snowflake-like).
+	const taskID = "task_1771138119398992000"
+
+	// Seed the result store with multiple tasks so the model must pick
+	// the right one using its own task ID from the system message.
+	store := newMockResultStore()
+	_ = store.SaveResult(&model.Result{
+		TaskID:   "task_1771000000000000001",
+		Output:   "Disk usage: 45% used, 120GB free",
+		ExitCode: 0,
+	})
+	_ = store.SaveResult(&model.Result{
+		TaskID:   taskID,
+		Output:   "Temperature: 72F, Humidity: 45%, Condition: Sunny",
+		ExitCode: 0,
+	})
+	_ = store.SaveResult(&model.Result{
+		TaskID:   "task_1771000000000000003",
+		Output:   "CPU load average: 0.42, Memory: 8.2GB/16GB",
+		ExitCode: 0,
+	})
+
+	// Prompt does NOT mention get_task_result or the task ID.
+	// The model must discover both from the system message.
+	// Uses the real MCP config so external tools (browser, etc.) are loaded
+	// alongside the internal get_task_result — matching production (48+ tools).
+	task := &model.Task{
+		ID:     taskID,
+		Prompt: `Retrieve the results from your previous execution and summarize them.`,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	output, err := RunTask(ctx, task, cfg, store)
+	if err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	t.Logf("Model output:\n%s", output)
+
+	// The model should have called get_task_result with its own task ID
+	// and returned the weather data — not disk or CPU data from other tasks.
+	if !strings.Contains(output, "72") && !strings.Contains(output, "Sunny") {
+		t.Errorf("Expected output to contain data from the stored result (72 or Sunny), got: %s", output)
+	}
+}
+
+func TestRunTaskIntegration_InternalGetTaskResult_MCPNamespaceAnthropic(t *testing.T) {
+	if os.Getenv("MCP_CRON_ENABLE_ANTHROPIC_TESTS") != "true" {
+		t.Skip("Skipping Anthropic integration test. Set MCP_CRON_ENABLE_ANTHROPIC_TESTS=true to run.")
+	}
+
+	cfg := config.DefaultConfig()
+	cfg.AI.Provider = "anthropic"
+	cfg.AI.Model = "claude-sonnet-4-5-20250929"
+	cfg.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
+	if cfg.AI.AnthropicAPIKey == "" {
+		t.Skip("ANTHROPIC_API_KEY environment variable not set")
+	}
+
+	const taskID = "task_1771138119398992000"
+
+	store := newMockResultStore()
+	_ = store.SaveResult(&model.Result{
+		TaskID:   "task_1771000000000000001",
+		Output:   "Disk usage: 45% used, 120GB free",
+		ExitCode: 0,
+	})
+	_ = store.SaveResult(&model.Result{
+		TaskID:   taskID,
+		Output:   "Temperature: 72F, Humidity: 45%, Condition: Sunny",
+		ExitCode: 0,
+	})
+	_ = store.SaveResult(&model.Result{
+		TaskID:   "task_1771000000000000003",
+		Output:   "CPU load average: 0.42, Memory: 8.2GB/16GB",
+		ExitCode: 0,
+	})
+
+	// Prompt does NOT mention get_task_result or the task ID.
+	task := &model.Task{
+		ID:     taskID,
+		Prompt: `Retrieve the results from your previous execution and summarize them.`,
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	output, err := RunTask(ctx, task, cfg, store)
+	if err != nil {
+		t.Fatalf("RunTask failed: %v", err)
+	}
+
+	t.Logf("Model output:\n%s", output)
+
+	// The model should have called get_task_result and included the weather data
+	if !strings.Contains(output, "72") && !strings.Contains(output, "Sunny") {
+		t.Errorf("Expected output to contain data from the stored result (72 or Sunny), got: %s", output)
+	}
+}
+
 func TestRunTaskIntegrationListToolsOpenAI(t *testing.T) {
 	if os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS") != "true" {
 		t.Skip("Skipping OpenAI list-tools integration test. Set MCP_CRON_ENABLE_OPENAI_TESTS=true to run.")
