@@ -229,7 +229,7 @@ func TestRunTaskIntegration(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	output, err := RunTask(ctx, task, cfg)
+	output, err := RunTask(ctx, task, cfg, nil)
 	if err != nil {
 		t.Fatalf("RunTask failed: %v", err)
 	}
@@ -269,7 +269,7 @@ func TestRunTaskIntegrationAnthropic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	output, err := RunTask(ctx, task, cfg)
+	output, err := RunTask(ctx, task, cfg, nil)
 	if err != nil {
 		t.Fatalf("RunTask failed: %v", err)
 	}
@@ -311,7 +311,7 @@ func TestRunTaskIntegrationListToolsOpenAI(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	output, err := RunTask(ctx, task, cfg)
+	output, err := RunTask(ctx, task, cfg, nil)
 	if err != nil {
 		t.Fatalf("RunTask failed: %v", err)
 	}
@@ -366,7 +366,7 @@ func TestRunTaskIntegrationListToolsAnthropic(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	output, err := RunTask(ctx, task, cfg)
+	output, err := RunTask(ctx, task, cfg, nil)
 	if err != nil {
 		t.Fatalf("RunTask failed: %v", err)
 	}

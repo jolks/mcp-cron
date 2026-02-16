@@ -265,6 +265,30 @@ func waitForResult(t *testing.T, srv *MCPServer, taskID string, timeout time.Dur
 	}
 }
 
+// waitForNResults polls the result store until at least n results exist for
+// the given task, or the deadline expires.
+func waitForNResults(t *testing.T, srv *MCPServer, taskID string, n int, timeout time.Duration) []*model.Result {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		select {
+		case <-deadline:
+			t.Fatalf("did not get %d results for task %s within %s", n, taskID, timeout)
+		default:
+		}
+		req := makeRequest(t, TaskResultParams{ID: taskID, Limit: n})
+		res, err := srv.handleGetTaskResult(context.Background(), req)
+		if err == nil {
+			var results []*model.Result
+			parseResponse(t, res, &results)
+			if len(results) >= n {
+				return results
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+}
+
 // configureAIProvider sets up the AI provider on the server config based on
 // available env vars. Returns true if an AI provider is available, false otherwise.
 func configureAIProvider(t *testing.T, srv *MCPServer) bool {
@@ -847,5 +871,60 @@ func TestIntegration_ScheduledRunTaskResumesSchedule(t *testing.T) {
 				t.Error("expected task to remain enabled after execution")
 			}
 		})
+	}
+}
+
+// TestIntegration_AITaskGetTaskResult verifies that an AI task can call
+// get_task_result (injected internally) to read its own prior output and
+// build on it across executions (n → n+1 pattern).
+func TestIntegration_AITaskGetTaskResult(t *testing.T) {
+	srv := createIntegrationTestServer(t, integrationOpts{
+		withStore:    true,
+		pollInterval: 200 * time.Millisecond,
+	})
+	if !configureAIProvider(t, srv) {
+		t.Skip("Skipping — set MCP_CRON_ENABLE_OPENAI_TESTS=true or MCP_CRON_ENABLE_ANTHROPIC_TESTS=true to run")
+	}
+
+	// Add a scheduled AI task that fires every 30 seconds.
+	// We'll use a placeholder prompt first, then update it with the actual task ID.
+	task := mustAddAITask(t, srv, AITaskParams{
+		TaskParams: TaskParams{
+			Name:     "ai-get-result-test",
+			Schedule: "*/30 * * * * *",
+			Enabled:  true,
+		},
+		Prompt: "placeholder",
+	})
+
+	// Update the prompt to include the task's own ID
+	prompt := `You have a tool called get_task_result. Call it with id '` + task.ID + `'. ` +
+		`If no result exists or it errors, respond with just the number 1. ` +
+		`If a result exists, parse the number from the output and respond with that number plus 1. ` +
+		`Respond ONLY with the number, nothing else.`
+
+	mustUpdateTask(t, srv, AITaskParams{
+		TaskParams: TaskParams{
+			ID: task.ID,
+		},
+		Prompt: prompt,
+	})
+
+	// Wait for at least 2 results (2 scheduled executions)
+	results := waitForNResults(t, srv, task.ID, 2, 180*time.Second)
+
+	// Results are newest-first from the store. Reverse to get chronological order.
+	// results[0] = newest (should be "2"), results[1] = oldest (should be "1")
+	first := results[len(results)-1]  // oldest
+	second := results[len(results)-2] // second execution
+
+	t.Logf("First execution output: %q", first.Output)
+	t.Logf("Second execution output: %q", second.Output)
+
+	if !strings.Contains(first.Output, "1") {
+		t.Errorf("expected first execution output to contain '1', got %q", first.Output)
+	}
+	if !strings.Contains(second.Output, "2") {
+		t.Errorf("expected second execution output to contain '2', got %q", second.Output)
 	}
 }

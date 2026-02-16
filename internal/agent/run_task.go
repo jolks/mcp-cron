@@ -3,6 +3,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 
@@ -36,16 +37,100 @@ func newChatProvider(cfg *config.Config) (ChatProvider, error) {
 	}
 }
 
+// internalGetTaskResultTool is the tool definition for the internal get_task_result tool
+// injected into AI tasks so they can read past execution results without spawning
+// a second mcp-cron process.
+var internalGetTaskResultTool = ToolDefinition{
+	Name:        "get_task_result",
+	Description: "Gets execution results for a task. Returns the latest result by default, or recent history when limit > 1.",
+	Parameters: map[string]interface{}{
+		"type": "object",
+		"properties": map[string]interface{}{
+			"id": map[string]interface{}{
+				"type":        "string",
+				"description": "the ID of the task to get results for",
+			},
+			"limit": map[string]interface{}{
+				"type":        "integer",
+				"description": "number of recent results to return (default 1, max 100)",
+			},
+		},
+		"required": []string{"id"},
+	},
+}
+
+// handleInternalGetTaskResult dispatches an internal get_task_result call
+// against the provided ResultStore.
+func handleInternalGetTaskResult(store model.ResultStore, call ToolCall) (string, error) {
+	var params struct {
+		ID    string `json:"id"`
+		Limit int    `json:"limit"`
+	}
+	if err := json.Unmarshal([]byte(call.Arguments), &params); err != nil {
+		return "", fmt.Errorf("failed to parse get_task_result arguments: %w", err)
+	}
+	if params.ID == "" {
+		return "", fmt.Errorf("task ID is required")
+	}
+
+	limit := params.Limit
+	if limit <= 0 {
+		limit = 1
+	}
+
+	if limit == 1 {
+		result, err := store.GetLatestResult(params.ID)
+		if err != nil || result == nil {
+			return "", fmt.Errorf("no result found for task %s", params.ID)
+		}
+		out, err := json.Marshal(result)
+		if err != nil {
+			return "", fmt.Errorf("failed to marshal result: %w", err)
+		}
+		return string(out), nil
+	}
+
+	results, err := store.GetResults(params.ID, limit)
+	if err != nil {
+		return "", fmt.Errorf("failed to get results: %w", err)
+	}
+	if len(results) == 0 {
+		return "", fmt.Errorf("no results found for task %s", params.ID)
+	}
+	out, err := json.Marshal(results)
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal results: %w", err)
+	}
+	return string(out), nil
+}
+
 // RunTask executes an AI task using the configured LLM provider.
-func RunTask(ctx context.Context, t *model.Task, cfg *config.Config) (string, error) {
+func RunTask(ctx context.Context, t *model.Task, cfg *config.Config, resultStore model.ResultStore) (string, error) {
 	logger := logging.GetDefaultLogger().WithField("task_id", t.ID)
 	logger.Infof("Running AI task: %s", t.Name)
 
-	// Get tools for the AI agent
-	tools, dispatcher, err := buildToolsFromConfig(cfg)
+	// Get tools for the AI agent from MCP config
+	tools, mcpDispatcher, err := buildToolsFromConfig(cfg)
 	if err != nil {
-		logger.Errorf("Failed to build tools: %v", err)
-		return "", err
+		logger.Warnf("Failed to build MCP tools (continuing with internal tools only): %v", err)
+		tools = nil
+		mcpDispatcher = nil
+	}
+
+	// Inject internal get_task_result tool if a result store is available
+	if resultStore != nil {
+		tools = append(tools, internalGetTaskResultTool)
+	}
+
+	// Build combined dispatcher: internal tools take priority, then MCP tools
+	dispatcher := func(ctx context.Context, call ToolCall) (string, error) {
+		if call.Name == "get_task_result" && resultStore != nil {
+			return handleInternalGetTaskResult(resultStore, call)
+		}
+		if mcpDispatcher != nil {
+			return mcpDispatcher(ctx, call)
+		}
+		return "", fmt.Errorf("unknown tool: %s", call.Name)
 	}
 
 	// Build the provider

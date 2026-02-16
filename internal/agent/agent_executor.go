@@ -78,7 +78,7 @@ func (ae *AgentExecutor) ExecuteAgentTask(
 	}
 
 	// Execute the task using RunTask
-	output, err := RunTask(execCtx, task, ae.config)
+	output, err := RunTask(execCtx, task, ae.config, ae.resultStore)
 
 	// Update result fields
 	result.EndTime = time.Now()
