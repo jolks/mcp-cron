@@ -48,6 +48,8 @@ scripts/
 - **Task statuses**: pending, running, completed, failed, disabled
 - **Storage**: In-memory read cache refreshed from SQLite on each poll tick; SQLite is the source of truth for task definitions and result history (`modernc.org/sqlite`, pure Go)
 - **Scheduling**: Poll-based — `next_run` column in `tasks` table, polled every `PollInterval` (default 1s). Optimistic locking (`UPDATE ... WHERE next_run = :current`) prevents duplicate execution across multiple instances sharing the same DB. Tasks can be **scheduled** (with a cron expression) or **on-demand** (no schedule, triggered via `run_task`).
+- **AI task system message**: AI tasks receive a short system message (~450 chars) with their task ID, `get_task_result` usage instructions, and MCP namespace prefix mapping. Tool definitions are NOT listed (models get those via the API).
+- **Graceful shutdown**: Scheduler tracks in-flight task goroutines with a `sync.WaitGroup`; `Stop()` blocks until all running tasks complete and persist results. Shutdown timeout is derived from `DefaultTimeout + 1 minute`. Result store is closed last in `app.Stop()`, after scheduler and server.
 - **Transport**: SSE (HTTP, default) or stdio (for CLI/Docker integration). Stdio mode auto-exits on stdin EOF via `server.Done()` channel.
 
 ## MCP Tools Exposed

@@ -46,6 +46,10 @@ MCP_CRON_ENABLE_ANTHROPIC_TESTS=true go test ./...
 | `TestIntegration_OnDemandAITask` | Create an on-demand AI task and verify type/schedule |
 | `TestIntegration_OnDemandRunTaskLifecycle` | Full on-demand lifecycle via poll loop (shell + AI subtests) |
 | `TestIntegration_ScheduledRunTaskResumesSchedule` | run_task on a scheduled task resumes its cron schedule after execution (shell + AI subtests) |
+| `TestIntegration_AITaskGetTaskResult` | AI task calls internal get_task_result to access prior execution output |
+| `TestRunTaskIntegration_InternalGetTaskResult_MCPNamespace` | OpenAI model discovers get_task_result from system message alone (no tool name in prompt) |
+| `TestRunTaskIntegration_InternalGetTaskResult_MCPNamespaceAnthropic` | Anthropic model discovers get_task_result from system message alone |
+| `TestStopWaitsForInFlightTasks` | Scheduler Stop() blocks until in-flight task goroutines complete |
 
 ## Linting
 

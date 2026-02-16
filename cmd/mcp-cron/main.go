@@ -141,6 +141,7 @@ type Application struct {
 	server        *server.MCPServer
 	logger        *logging.Logger
 	releaseSleep  func()
+	taskTimeout   time.Duration // used to derive shutdown deadline
 }
 
 // createApp creates a new application instance
@@ -175,6 +176,7 @@ func createApp(cfg *config.Config) (*Application, error) {
 		resultStore:   resultStore,
 		server:        mcpServer,
 		logger:        logger,
+		taskTimeout:   cfg.Scheduler.DefaultTimeout,
 	}
 
 	// Prevent system sleep if configured
@@ -261,9 +263,8 @@ func waitForShutdown(cancel context.CancelFunc, app *Application) {
 	cancel()
 
 	// Stop the application. The scheduler waits for in-flight tasks to finish
-	// (bounded by each task's own timeout, default 10 minutes), so we use a
-	// generous outer deadline.
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 11*time.Minute)
+	// (bounded by each task's own timeout), so the outer deadline must exceed it.
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), app.taskTimeout+1*time.Minute)
 	defer shutdownCancel()
 
 	shutdownDone := make(chan struct{})
