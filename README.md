@@ -313,31 +313,6 @@ Examples:
 
 ## Development
 
-### Project Structure
-
-```
-mcp-cron/
-├── cmd/
-│   └── mcp-cron/        # Main application entry point
-├── internal/
-│   ├── agent/           # AI agent execution functionality
-│   ├── command/         # Command execution functionality
-│   ├── config/          # Configuration handling
-│   ├── errors/          # Error types and handling
-│   ├── logging/         # Logging utilities
-│   ├── model/           # Data models and types
-│   ├── scheduler/       # Task scheduling
-│   ├── server/          # MCP server implementation
-│   ├── sleep/           # Platform-specific system sleep prevention
-│   ├── store/           # SQLite store (persistent task definitions + result history)
-│   └── utils/           # Miscellaneous utilities
-├── npm/                 # npm packages (main + platform-specific binaries)
-├── scripts/             # Build and publish scripts
-├── go.mod               # Go modules definition
-├── go.sum               # Go modules checksums
-└── README.md            # Project documentation
-```
-
 ### Building
 
 ```bash
