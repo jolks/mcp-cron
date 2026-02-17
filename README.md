@@ -185,8 +185,8 @@ The following environment variables are supported:
 | `MCP_CRON_SERVER_ADDRESS` | The address to bind the server to | `localhost` |
 | `MCP_CRON_SERVER_PORT` | The port to bind the server to | `8080` |
 | `MCP_CRON_SERVER_TRANSPORT` | Transport mode: `sse` or `stdio` | `sse` |
-| `MCP_CRON_SERVER_NAME` | Server name | `mcp-cron` |
-| `MCP_CRON_SERVER_VERSION` | Server version | `dev` |
+| `MCP_CRON_SERVER_NAME` | **Deprecated** — ignored; the server name is fixed to ensure self-reference detection works correctly | - |
+| `MCP_CRON_SERVER_VERSION` | **Deprecated** — ignored; version is set at build time via ldflags | - |
 | `MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT` | Default timeout for task execution | `10m` |
 | `MCP_CRON_LOGGING_LEVEL` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `MCP_CRON_LOGGING_FILE` | Log file path | stdout |

@@ -3,12 +3,16 @@ package config
 
 import (
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
 )
+
+// ServerName is the fixed server name used for MCP identity and self-reference detection.
+const ServerName = "mcp-cron"
 
 // Version is the default version, overridden at build time via:
 //
@@ -46,12 +50,6 @@ type ServerConfig struct {
 
 	// Transport mode (sse, stdio)
 	TransportMode string
-
-	// Server name
-	Name string
-
-	// Server version
-	Version string
 }
 
 // SchedulerConfig holds scheduler-specific configuration
@@ -123,8 +121,6 @@ func DefaultConfig() *Config {
 			Address:       "localhost",
 			Port:          8080,
 			TransportMode: "sse",
-			Name:          "mcp-cron",
-			Version:       Version,
 		},
 		Scheduler: SchedulerConfig{
 			DefaultTimeout: 10 * time.Minute,
@@ -200,12 +196,12 @@ func FromEnv(config *Config) {
 		config.Server.TransportMode = val
 	}
 
-	if val := os.Getenv("MCP_CRON_SERVER_NAME"); val != "" {
-		config.Server.Name = val
+	if os.Getenv("MCP_CRON_SERVER_NAME") != "" {
+		log.Printf("WARN: MCP_CRON_SERVER_NAME is deprecated and ignored; the server name is fixed to %q to ensure self-reference detection works correctly", ServerName)
 	}
 
-	if val := os.Getenv("MCP_CRON_SERVER_VERSION"); val != "" {
-		config.Server.Version = val
+	if os.Getenv("MCP_CRON_SERVER_VERSION") != "" {
+		log.Printf("WARN: MCP_CRON_SERVER_VERSION is deprecated and ignored; version is set at build time via ldflags")
 	}
 
 	// Scheduler configuration

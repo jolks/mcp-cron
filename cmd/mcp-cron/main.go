@@ -48,7 +48,7 @@ func main() {
 
 	// Show version and exit if requested
 	if *version {
-		log.Printf("%s version %s", cfg.Server.Name, cfg.Server.Version)
+		log.Printf("%s version %s", config.ServerName, config.Version)
 		os.Exit(0)
 	}
 

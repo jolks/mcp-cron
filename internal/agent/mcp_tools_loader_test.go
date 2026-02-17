@@ -132,9 +132,8 @@ func TestSelfReferenceDetection(t *testing.T) {
 	}
 
 	// Verify the self-reference check would match
-	cfg := config.DefaultConfig()
-	if res.ServerInfo.Name != cfg.Server.Name {
-		t.Errorf("Server name %q should match config server name %q", res.ServerInfo.Name, cfg.Server.Name)
+	if res.ServerInfo.Name != config.ServerName {
+		t.Errorf("Server name %q should match config.ServerName %q", res.ServerInfo.Name, config.ServerName)
 	}
 }
 
@@ -170,8 +169,7 @@ func TestNonSelfServerNotSkipped(t *testing.T) {
 		t.Fatal("No server info returned")
 	}
 
-	cfg := config.DefaultConfig()
-	if res.ServerInfo.Name == cfg.Server.Name {
+	if res.ServerInfo.Name == config.ServerName {
 		t.Error("Non-self server should not match mcp-cron server name")
 	}
 
@@ -185,37 +183,4 @@ func TestNonSelfServerNotSkipped(t *testing.T) {
 	}
 }
 
-func TestSelfReferenceWithCustomServerName(t *testing.T) {
-	// Test that self-reference detection works with a custom server name
-	customName := "my-custom-cron"
 
-	srv := mcp.NewServer(&mcp.Implementation{Name: customName, Version: "1.0.0"}, nil)
-	clientTransport, serverTransport := mcp.NewInMemoryTransports()
-	go func() {
-		_ = srv.Run(context.Background(), serverTransport)
-	}()
-
-	cli := mcp.NewClient(&mcp.Implementation{Name: "test", Version: "1.0.0"}, nil)
-	session, err := cli.Connect(context.Background(), clientTransport, nil)
-	if err != nil {
-		t.Fatalf("Failed to connect: %v", err)
-	}
-	defer func() { _ = session.Close() }()
-
-	res := session.InitializeResult()
-	if res == nil || res.ServerInfo == nil {
-		t.Fatal("No server info returned")
-	}
-
-	// With default config name "mcp-cron", this should NOT match
-	cfg := config.DefaultConfig()
-	if res.ServerInfo.Name == cfg.Server.Name {
-		t.Error("Custom-named server should not match default mcp-cron name")
-	}
-
-	// With matching config name, it SHOULD match
-	cfg.Server.Name = customName
-	if res.ServerInfo.Name != cfg.Server.Name {
-		t.Error("Server name should match when config name is set to the same value")
-	}
-}

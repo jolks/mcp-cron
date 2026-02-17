@@ -264,7 +264,6 @@ func TestLogFilePath(t *testing.T) {
 	cfg := &config.Config{
 		Server: config.ServerConfig{
 			TransportMode: "stdio",
-			Name:          "mcp-cron",
 		},
 		Scheduler: *createTestSchedulerConfig(),
 	}

@@ -21,12 +21,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Server.TransportMode != "sse" {
 		t.Errorf("Expected default transport mode to be 'sse', got '%s'", cfg.Server.TransportMode)
 	}
-	if cfg.Server.Name != "mcp-cron" {
-		t.Errorf("Expected default server name to be 'mcp-cron', got '%s'", cfg.Server.Name)
-	}
-	if cfg.Server.Version != "dev" {
-		t.Errorf("Expected default server version to be 'dev', got '%s'", cfg.Server.Version)
-	}
 
 	// Test Scheduler defaults
 	if cfg.Scheduler.DefaultTimeout != 10*time.Minute {
@@ -135,8 +129,6 @@ func TestFromEnv(t *testing.T) {
 		"MCP_CRON_SERVER_ADDRESS":            os.Getenv("MCP_CRON_SERVER_ADDRESS"),
 		"MCP_CRON_SERVER_PORT":               os.Getenv("MCP_CRON_SERVER_PORT"),
 		"MCP_CRON_SERVER_TRANSPORT":          os.Getenv("MCP_CRON_SERVER_TRANSPORT"),
-		"MCP_CRON_SERVER_NAME":               os.Getenv("MCP_CRON_SERVER_NAME"),
-		"MCP_CRON_SERVER_VERSION":            os.Getenv("MCP_CRON_SERVER_VERSION"),
 		"MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT": os.Getenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT"),
 		"MCP_CRON_LOGGING_LEVEL":             os.Getenv("MCP_CRON_LOGGING_LEVEL"),
 		"MCP_CRON_LOGGING_FILE":              os.Getenv("MCP_CRON_LOGGING_FILE"),
@@ -172,8 +164,6 @@ func TestFromEnv(t *testing.T) {
 	_ = os.Setenv("MCP_CRON_SERVER_ADDRESS", "127.0.0.1")
 	_ = os.Setenv("MCP_CRON_SERVER_PORT", "9090")
 	_ = os.Setenv("MCP_CRON_SERVER_TRANSPORT", "stdio")
-	_ = os.Setenv("MCP_CRON_SERVER_NAME", "test-server")
-	_ = os.Setenv("MCP_CRON_SERVER_VERSION", "1.0.0")
 	_ = os.Setenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT", "5m")
 	_ = os.Setenv("MCP_CRON_LOGGING_LEVEL", "debug")
 	_ = os.Setenv("MCP_CRON_LOGGING_FILE", "/tmp/test.log")
@@ -201,12 +191,6 @@ func TestFromEnv(t *testing.T) {
 	}
 	if cfg.Server.TransportMode != "stdio" {
 		t.Errorf("Expected transport mode 'stdio', got '%s'", cfg.Server.TransportMode)
-	}
-	if cfg.Server.Name != "test-server" {
-		t.Errorf("Expected server name 'test-server', got '%s'", cfg.Server.Name)
-	}
-	if cfg.Server.Version != "1.0.0" {
-		t.Errorf("Expected server version '1.0.0', got '%s'", cfg.Server.Version)
 	}
 	if cfg.Scheduler.DefaultTimeout != 5*time.Minute {
 		t.Errorf("Expected default timeout 5m, got %s", cfg.Scheduler.DefaultTimeout)

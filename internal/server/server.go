@@ -94,10 +94,10 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		// corrupting the JSON-RPC stream on stdout
 		execPath, err := os.Executable()
 		if err != nil {
-			execPath = cfg.Server.Name
+			execPath = config.ServerName
 		}
 		execDir := filepath.Dir(execPath)
-		logFilename := fmt.Sprintf("%s.log", cfg.Server.Name)
+		logFilename := fmt.Sprintf("%s.log", config.ServerName)
 		logPath := filepath.Join(execDir, logFilename)
 
 		logFile, err := osOpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
@@ -136,8 +136,8 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 
 	// Create MCP server
 	mcpSrv := mcp.NewServer(&mcp.Implementation{
-		Name:    cfg.Server.Name,
-		Version: cfg.Server.Version,
+		Name:    config.ServerName,
+		Version: config.Version,
 	}, nil)
 
 	// Create MCP Server

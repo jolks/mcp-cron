@@ -61,7 +61,7 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		// rather than relying on the config key name or tool names.
 		// We must close the session to kill the spawned child process,
 		// otherwise it loads tasks from SQLite and schedules duplicates.
-		if res := session.InitializeResult(); res != nil && res.ServerInfo != nil && res.ServerInfo.Name == sysCfg.Server.Name {
+		if res := session.InitializeResult(); res != nil && res.ServerInfo != nil && res.ServerInfo.Name == config.ServerName {
 			log.Printf("Skipping MCP server %q: detected as mcp-cron (self-reference)\n", name)
 			_ = session.Close()
 			continue
