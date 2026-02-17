@@ -27,6 +27,7 @@ internal/
   model/               # Core types: Task, Result, TaskType, TaskStatus, Executor, ResultStore interfaces
   scheduler/           # Poll-based DB scheduler (robfig/cron parser only), optimistic locking for multi-instance dedup
   server/              # MCP server, tool registration, HTTP/stdio transport, handlers
+  singleton/           # File-lock-based singleton per db-path (primary/secondary instance selection)
   sleep/               # Platform-specific system sleep prevention (macOS, Windows)
   store/               # SQLite store (persistent task definitions + result history, schema migrations)
   utils/               # JSON unmarshal helper
@@ -50,7 +51,8 @@ scripts/
 - **Scheduling**: Poll-based — `next_run` column in `tasks` table, polled every `PollInterval` (default 1s). Optimistic locking (`UPDATE ... WHERE next_run = :current`) prevents duplicate execution across multiple instances sharing the same DB. Tasks can be **scheduled** (with a cron expression) or **on-demand** (no schedule, triggered via `run_task`).
 - **AI task system message**: AI tasks receive a short system message (~450 chars) with their task ID, `get_task_result` usage instructions, and MCP namespace prefix mapping. Tool definitions are NOT listed (models get those via the API).
 - **Graceful shutdown**: Scheduler tracks in-flight task goroutines with a `sync.WaitGroup`; `Stop()` blocks until all running tasks complete and persist results. Shutdown timeout is derived from `DefaultTimeout + 1 minute`. Result store is closed last in `app.Stop()`, after scheduler and server.
-- **Transport**: SSE (HTTP, default) or stdio (for CLI/Docker integration). In stdio mode, when the MCP client disconnects (stdin EOF), the scheduler keeps running so scheduled tasks continue to fire; only SIGINT/SIGTERM triggers a full shutdown.
+- **Singleton per db-path**: A file lock (`gofrs/flock`) on `<db-path>.lock` determines the **primary** instance. The first instance to acquire the lock is primary and enters keep-alive mode after transport exit (scheduler continues running). Subsequent instances on the same db-path are **secondary** — they serve their MCP request and exit when the transport closes. This prevents N lingering processes when MCP clients spawn mcp-cron per request.
+- **Transport**: SSE (HTTP, default) or stdio (for CLI/Docker integration). In stdio mode, the primary instance keeps the scheduler running after the MCP client disconnects (stdin EOF). SIGTERM is ignored after transport exit (MCP clients send it during cleanup); only SIGINT (`kill -INT` / Ctrl+C) or SIGKILL triggers shutdown. Secondary instances shut down gracefully after transport exit (waiting for in-flight tasks to complete).
 
 ## MCP Tools Exposed
 
@@ -63,6 +65,7 @@ list_tasks, get_task, get_task_result, add_task, add_ai_task, update_task, remov
 - `github.com/anthropics/anthropic-sdk-go` — Anthropic API client (for AI tasks)
 - `github.com/robfig/cron/v3` — Cron expression parsing (parser only, no in-memory scheduler engine)
 - `modernc.org/sqlite` — Pure-Go SQLite driver (no CGo) for persistent result history
+- `github.com/gofrs/flock` — File-based locking for singleton instance per db-path
 
 ## npm Packaging
 

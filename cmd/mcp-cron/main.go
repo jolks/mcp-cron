@@ -18,6 +18,7 @@ import (
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 	"github.com/jolks/mcp-cron/internal/server"
+	"github.com/jolks/mcp-cron/internal/singleton"
 	"github.com/jolks/mcp-cron/internal/sleep"
 	"github.com/jolks/mcp-cron/internal/store"
 )
@@ -51,6 +52,17 @@ func main() {
 		os.Exit(0)
 	}
 
+	// Try to become the primary instance for this db-path.
+	// Primary: enters keep-alive mode after transport exits (scheduler continues).
+	// Secondary: exits after transport closes (avoids lingering processes).
+	lock, isPrimary, err := singleton.TryAcquire(cfg.Store.DBPath)
+	if err != nil {
+		log.Fatalf("Failed to acquire singleton lock: %v", err)
+	}
+	if isPrimary {
+		defer func() { _ = lock.Release() }()
+	}
+
 	// Create a context that will be cancelled on interrupt signal
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -67,7 +79,7 @@ func main() {
 	}
 
 	// Wait for termination signal or server exit (e.g. stdin closed in stdio mode)
-	waitForShutdown(cancel, app)
+	waitForShutdown(cancel, app, isPrimary)
 }
 
 // loadConfig loads configuration from environment and command line flags
@@ -247,8 +259,10 @@ func (a *Application) Stop() error {
 	return nil
 }
 
-// waitForShutdown waits for termination signals or server exit and performs cleanup
-func waitForShutdown(cancel context.CancelFunc, app *Application) {
+// waitForShutdown waits for termination signals or server exit and performs cleanup.
+// Primary instances enter keep-alive mode after transport exit (scheduler continues).
+// Secondary instances shut down after transport exit (avoids lingering processes).
+func waitForShutdown(cancel context.CancelFunc, app *Application, isPrimary bool) {
 	signalCh := make(chan os.Signal, 1)
 	signal.Notify(signalCh, syscall.SIGINT, syscall.SIGTERM)
 
@@ -256,11 +270,26 @@ func waitForShutdown(cancel context.CancelFunc, app *Application) {
 	case <-signalCh:
 		app.logger.Infof("Received termination signal, shutting down...")
 	case <-app.server.Done():
-		// Transport closed (e.g. stdin EOF) but the scheduler keeps running
-		// so scheduled tasks continue to fire on time.
+		if !isPrimary {
+			// Secondary instance — shut down after transport closes.
+			// The primary instance handles the scheduler.
+			app.logger.Infof("Server transport exited, shutting down (secondary instance)")
+			break
+		}
+
+		// Primary instance — keep the scheduler running so scheduled
+		// tasks continue to fire on time.
 		app.logger.Infof("Server transport exited, scheduler continues running")
-		<-signalCh
-		app.logger.Infof("Received termination signal, shutting down...")
+
+		// MCP clients send SIGTERM after closing stdin to clean up the
+		// server process. Ignore it so the scheduler survives. Only
+		// SIGINT (kill -INT / Ctrl+C) or SIGKILL triggers shutdown.
+		signal.Stop(signalCh)
+		signal.Ignore(syscall.SIGTERM)
+		intCh := make(chan os.Signal, 1)
+		signal.Notify(intCh, syscall.SIGINT)
+		<-intCh
+		app.logger.Infof("Received interrupt signal, shutting down...")
 	}
 
 	// Cancel the context to stop the poll loop from scheduling new tasks
