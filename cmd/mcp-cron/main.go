@@ -256,7 +256,11 @@ func waitForShutdown(cancel context.CancelFunc, app *Application) {
 	case <-signalCh:
 		app.logger.Infof("Received termination signal, shutting down...")
 	case <-app.server.Done():
-		app.logger.Infof("Server transport exited, shutting down...")
+		// Transport closed (e.g. stdin EOF) but the scheduler keeps running
+		// so scheduled tasks continue to fire on time.
+		app.logger.Infof("Server transport exited, scheduler continues running")
+		<-signalCh
+		app.logger.Infof("Received termination signal, shutting down...")
 	}
 
 	// Cancel the context to stop the poll loop from scheduling new tasks
