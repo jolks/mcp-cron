@@ -3,23 +3,27 @@ package command
 
 import (
 	"context"
+	"io"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/jolks/mcp-cron/internal/logging"
 )
 
+func testLogger() *logging.Logger {
+	return logging.New(logging.Options{Output: io.Discard, Level: logging.Fatal})
+}
+
 func TestNewCommandExecutor(t *testing.T) {
-	executor := NewCommandExecutor(nil)
+	executor := NewCommandExecutor(nil, testLogger())
 	if executor == nil {
-		t.Fatal("NewCommandExecutor(nil) returned nil")
-	}
-	if executor.results == nil {
-		t.Error("CommandExecutor.results is nil")
+		t.Fatal("NewCommandExecutor(nil, testLogger()) returned nil")
 	}
 }
 
 func TestExecuteCommand(t *testing.T) {
-	executor := NewCommandExecutor(nil)
+	executor := NewCommandExecutor(nil, testLogger())
 	ctx := context.Background()
 
 	// Execute a simple echo command
@@ -40,7 +44,7 @@ func TestExecuteCommand(t *testing.T) {
 }
 
 func TestExecuteInvalidCommand(t *testing.T) {
-	executor := NewCommandExecutor(nil)
+	executor := NewCommandExecutor(nil, testLogger())
 	ctx := context.Background()
 
 	// Execute an invalid command
@@ -58,7 +62,7 @@ func TestExecuteInvalidCommand(t *testing.T) {
 }
 
 func TestCommandTimeout(t *testing.T) {
-	executor := NewCommandExecutor(nil)
+	executor := NewCommandExecutor(nil, testLogger())
 	ctx := context.Background()
 
 	// Execute a command that should timeout

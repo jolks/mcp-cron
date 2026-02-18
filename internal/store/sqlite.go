@@ -198,6 +198,28 @@ func (s *SQLiteStore) DeleteTask(taskID string) error {
 	return nil
 }
 
+// scanTask scans a single task row from the result set.
+func scanTask(rows *sql.Rows) (*model.Task, error) {
+	var t model.Task
+	var enabled int
+	var createdStr, updatedStr, nextRunStr string
+	if err := rows.Scan(
+		&t.ID, &t.Name, &t.Description, &t.Type,
+		&t.Command, &t.Prompt, &t.Schedule,
+		&enabled, &createdStr, &updatedStr, &nextRunStr,
+	); err != nil {
+		return nil, fmt.Errorf("scan task row: %w", err)
+	}
+	t.Enabled = enabled != 0
+	t.CreatedAt, _ = time.Parse(timeFormat, createdStr)
+	t.UpdatedAt, _ = time.Parse(timeFormat, updatedStr)
+	if nextRunStr != "" {
+		t.NextRun, _ = time.Parse(timeFormat, nextRunStr)
+	}
+	t.Status = model.StatusPending
+	return &t, nil
+}
+
 // LoadTasks returns all persisted task definitions.
 func (s *SQLiteStore) LoadTasks() ([]*model.Task, error) {
 	rows, err := s.db.Query(`
@@ -210,27 +232,14 @@ func (s *SQLiteStore) LoadTasks() ([]*model.Task, error) {
 
 	var tasks []*model.Task
 	for rows.Next() {
-		var t model.Task
-		var enabled int
-		var createdStr, updatedStr, nextRunStr string
-		if err := rows.Scan(
-			&t.ID, &t.Name, &t.Description, &t.Type,
-			&t.Command, &t.Prompt, &t.Schedule,
-			&enabled, &createdStr, &updatedStr, &nextRunStr,
-		); err != nil {
-			return nil, fmt.Errorf("scan task row: %w", err)
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
 		}
-		t.Enabled = enabled != 0
-		t.CreatedAt, _ = time.Parse(timeFormat, createdStr)
-		t.UpdatedAt, _ = time.Parse(timeFormat, updatedStr)
-		if nextRunStr != "" {
-			t.NextRun, _ = time.Parse(timeFormat, nextRunStr)
-		}
-		t.Status = model.StatusPending
 		if !t.Enabled {
 			t.Status = model.StatusDisabled
 		}
-		tasks = append(tasks, &t)
+		tasks = append(tasks, t)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate task rows: %w", err)
@@ -252,24 +261,11 @@ func (s *SQLiteStore) GetDueTasks(now time.Time) ([]*model.Task, error) {
 
 	var tasks []*model.Task
 	for rows.Next() {
-		var t model.Task
-		var enabled int
-		var createdStr, updatedStr, nextRunStr string
-		if err := rows.Scan(
-			&t.ID, &t.Name, &t.Description, &t.Type,
-			&t.Command, &t.Prompt, &t.Schedule,
-			&enabled, &createdStr, &updatedStr, &nextRunStr,
-		); err != nil {
-			return nil, fmt.Errorf("scan due task row: %w", err)
+		t, err := scanTask(rows)
+		if err != nil {
+			return nil, err
 		}
-		t.Enabled = enabled != 0
-		t.CreatedAt, _ = time.Parse(timeFormat, createdStr)
-		t.UpdatedAt, _ = time.Parse(timeFormat, updatedStr)
-		if nextRunStr != "" {
-			t.NextRun, _ = time.Parse(timeFormat, nextRunStr)
-		}
-		t.Status = model.StatusPending
-		tasks = append(tasks, &t)
+		tasks = append(tasks, t)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate due task rows: %w", err)

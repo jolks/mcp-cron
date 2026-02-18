@@ -13,7 +13,6 @@ import (
 	"github.com/jolks/mcp-cron/internal/agent"
 	"github.com/jolks/mcp-cron/internal/command"
 	"github.com/jolks/mcp-cron/internal/config"
-	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
 	"github.com/jolks/mcp-cron/internal/store"
@@ -60,17 +59,15 @@ func createIntegrationTestServer(t *testing.T, opts ...integrationOpts) *MCPServ
 		taskStore = sqlStore
 	}
 
-	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	logger := testLogger()
+
+	sched := scheduler.NewScheduler(&cfg.Scheduler, logger)
 	if taskStore != nil {
 		sched.SetTaskStore(taskStore)
 	}
 
-	cmdExec := command.NewCommandExecutor(resultStore)
-	agentExec := agent.NewAgentExecutor(cfg, resultStore)
-
-	logger := logging.New(logging.Options{
-		Level: logging.Info,
-	})
+	cmdExec := command.NewCommandExecutor(resultStore, logger)
+	agentExec := agent.NewAgentExecutor(cfg, resultStore, logger)
 
 	srv := &MCPServer{
 		scheduler:     sched,
@@ -317,7 +314,7 @@ func configureAIProvider(t *testing.T, srv *MCPServer) bool {
 // TestIntegration_ShellCommandFullLifecycle exercises the full shell command workflow:
 // add → list → get → execute → get_task_result
 func TestIntegration_ShellCommandFullLifecycle(t *testing.T) {
-	srv := createIntegrationTestServer(t)
+	srv := createIntegrationTestServer(t, integrationOpts{withStore: true})
 
 	task := mustAddShellTask(t, srv, TaskParams{
 		Name:     "echo-test",
@@ -328,7 +325,7 @@ func TestIntegration_ShellCommandFullLifecycle(t *testing.T) {
 	if task.ID == "" {
 		t.Fatal("expected non-empty task ID")
 	}
-	if task.Type != model.TypeShellCommand.String() {
+	if task.Type != model.TypeShellCommand {
 		t.Errorf("expected type %s, got %s", model.TypeShellCommand, task.Type)
 	}
 
@@ -359,7 +356,7 @@ func TestIntegration_ShellCommandFullLifecycle(t *testing.T) {
 // TestIntegration_AITaskFullLifecycle exercises the full AI task workflow:
 // add_ai_task → list → get → update → execute → get_task_result → remove → verify removed
 func TestIntegration_AITaskFullLifecycle(t *testing.T) {
-	srv := createIntegrationTestServer(t)
+	srv := createIntegrationTestServer(t, integrationOpts{withStore: true})
 
 	task := mustAddAITask(t, srv, AITaskParams{
 		TaskParams: TaskParams{
@@ -369,7 +366,7 @@ func TestIntegration_AITaskFullLifecycle(t *testing.T) {
 		},
 		Prompt: "What is 1+1? Answer with just the number",
 	})
-	if task.Type != model.TypeAI.String() {
+	if task.Type != model.TypeAI {
 		t.Errorf("expected type %s, got %s", model.TypeAI, task.Type)
 	}
 
@@ -459,7 +456,7 @@ func TestIntegration_EnableDisableFlow(t *testing.T) {
 
 // TestIntegration_ShellCommandFailure verifies that a failing command produces the correct error result.
 func TestIntegration_ShellCommandFailure(t *testing.T) {
-	srv := createIntegrationTestServer(t)
+	srv := createIntegrationTestServer(t, integrationOpts{withStore: true})
 
 	task := mustAddShellTask(t, srv, TaskParams{
 		Name:     "fail-test",
@@ -558,7 +555,7 @@ func TestIntegration_ErrorCases(t *testing.T) {
 
 // TestIntegration_MultipleTasksIsolation verifies that executing one task does not affect others' results.
 func TestIntegration_MultipleTasksIsolation(t *testing.T) {
-	srv := createIntegrationTestServer(t)
+	srv := createIntegrationTestServer(t, integrationOpts{withStore: true})
 
 	taskIDs := make([]string, 3)
 	for i := 0; i < 3; i++ {
@@ -594,7 +591,7 @@ func TestIntegration_MultipleTasksIsolation(t *testing.T) {
 
 // TestIntegration_OnDemandTask tests creating and running a task without a schedule.
 func TestIntegration_OnDemandTask(t *testing.T) {
-	srv := createIntegrationTestServer(t)
+	srv := createIntegrationTestServer(t, integrationOpts{withStore: true})
 
 	task := mustAddShellTask(t, srv, TaskParams{
 		Name:    "on-demand-echo",
@@ -676,7 +673,7 @@ func TestIntegration_OnDemandAITask(t *testing.T) {
 	if task.Schedule != "" {
 		t.Errorf("expected empty schedule for on-demand AI task, got %q", task.Schedule)
 	}
-	if task.Type != model.TypeAI.String() {
+	if task.Type != model.TypeAI {
 		t.Errorf("expected type %s, got %s", model.TypeAI, task.Type)
 	}
 }

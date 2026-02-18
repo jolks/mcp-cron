@@ -23,9 +23,9 @@ func createAITestServer(t *testing.T) *MCPServer {
 	cfg := config.DefaultConfig()
 
 	// Create dependencies
-	sched := scheduler.NewScheduler(&cfg.Scheduler)
-	cmdExec := command.NewCommandExecutor(nil)
-	agentExec := agent.NewAgentExecutor(cfg, nil)
+	sched := scheduler.NewScheduler(&cfg.Scheduler, testLogger())
+	cmdExec := command.NewCommandExecutor(nil, testLogger())
+	agentExec := agent.NewAgentExecutor(cfg, nil, testLogger())
 
 	// Create a logger
 	logger := logging.New(logging.Options{
@@ -162,7 +162,7 @@ func TestUpdateAITask_AI(t *testing.T) {
 		ID:          taskID,
 		Name:        "Initial AI Task",
 		Schedule:    "*/5 * * * *",
-		Type:        model.TypeAI.String(),
+		Type:        model.TypeAI,
 		Prompt:      "Initial prompt",
 		Description: "Initial description",
 		Enabled:     false,
@@ -266,7 +266,7 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 		ID:          shellTaskID,
 		Name:        "Shell Command Task",
 		Schedule:    "*/5 * * * *",
-		Type:        model.TypeShellCommand.String(),
+		Type:        model.TypeShellCommand,
 		Command:     "echo hello",
 		Description: "A shell command task",
 		Enabled:     false,
@@ -285,7 +285,7 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 	updateParams := AITaskParams{
 		TaskParams: TaskParams{
 			ID:   shellTaskID,
-			Type: model.TypeAI.String(),
+			Type: string(model.TypeAI),
 		},
 		Prompt: "New AI prompt",
 	}
@@ -311,8 +311,8 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get converted task: %v", err)
 	}
-	if convertedTask.Type != model.TypeAI.String() {
-		t.Errorf("Expected type to be converted to '%s', got '%s'", model.TypeAI.String(), convertedTask.Type)
+	if convertedTask.Type != model.TypeAI {
+		t.Errorf("Expected type to be converted to '%s', got '%s'", model.TypeAI, convertedTask.Type)
 	}
 	if convertedTask.Prompt != "New AI prompt" {
 		t.Errorf("Expected prompt to be set to 'New AI prompt', got '%s'", convertedTask.Prompt)
@@ -324,7 +324,7 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 		ID:          aiTaskID,
 		Name:        "AI Task",
 		Schedule:    "*/5 * * * *",
-		Type:        model.TypeAI.String(),
+		Type:        model.TypeAI,
 		Prompt:      "AI prompt",
 		Description: "An AI task",
 		Enabled:     false,
@@ -343,7 +343,7 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 	convertParams := AITaskParams{
 		TaskParams: TaskParams{
 			ID:      aiTaskID,
-			Type:    model.TypeShellCommand.String(),
+			Type:    string(model.TypeShellCommand),
 			Command: "echo converted",
 		},
 	}
@@ -369,8 +369,8 @@ func TestConvertTaskTypes_AI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to get reconverted task: %v", err)
 	}
-	if reconvertedTask.Type != model.TypeShellCommand.String() {
-		t.Errorf("Expected type to be converted to '%s', got '%s'", model.TypeShellCommand.String(), reconvertedTask.Type)
+	if reconvertedTask.Type != model.TypeShellCommand {
+		t.Errorf("Expected type to be converted to '%s', got '%s'", model.TypeShellCommand, reconvertedTask.Type)
 	}
 	if reconvertedTask.Command != "echo converted" {
 		t.Errorf("Expected command to be set to 'echo converted', got '%s'", reconvertedTask.Command)

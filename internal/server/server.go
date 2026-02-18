@@ -3,6 +3,7 @@ package server
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
@@ -19,7 +20,6 @@ import (
 	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/scheduler"
-	"github.com/jolks/mcp-cron/internal/utils"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -73,23 +73,19 @@ type MCPServer struct {
 	isShuttingDown bool
 }
 
-// NewMCPServer creates a new MCP scheduler server
-func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecutor *command.CommandExecutor, agentExecutor *agent.AgentExecutor, resultStore model.ResultStore) (*MCPServer, error) {
-	// Create default config if not provided
-	if cfg == nil {
-		cfg = config.DefaultConfig()
-	}
-
-	// Initialize logger
-	var logger *logging.Logger
-
+// CreateLogger creates a logger appropriate for the given configuration.
+// For stdio transport, it directs output to a log file to avoid corrupting
+// the JSON-RPC stream on stdout.
+func CreateLogger(cfg *config.Config) (*logging.Logger, error) {
 	if cfg.Logging.FilePath != "" {
-		var err error
-		logger, err = logging.FileLogger(cfg.Logging.FilePath, parseLogLevel(cfg.Logging.Level))
+		logger, err := logging.FileLogger(cfg.Logging.FilePath, parseLogLevel(cfg.Logging.Level))
 		if err != nil {
 			return nil, fmt.Errorf("failed to create file logger: %w", err)
 		}
-	} else if cfg.Server.TransportMode == "stdio" {
+		return logger, nil
+	}
+
+	if cfg.Server.TransportMode == "stdio" {
 		// For stdio transport, all logging must go to a file to avoid
 		// corrupting the JSON-RPC stream on stdout
 		execPath, err := os.Executable()
@@ -103,26 +99,30 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		logFile, err := osOpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0666)
 		if err == nil {
 			log.SetOutput(logFile)
-			logger = logging.New(logging.Options{
+			return logging.New(logging.Options{
 				Output: logFile,
 				Level:  parseLogLevel(cfg.Logging.Level),
-			})
-		} else {
-			// Fall back to stderr to avoid corrupting stdout
-			log.SetOutput(os.Stderr)
-			logger = logging.New(logging.Options{
-				Output: os.Stderr,
-				Level:  parseLogLevel(cfg.Logging.Level),
-			})
+			}), nil
 		}
-	} else {
-		logger = logging.New(logging.Options{
-			Level: parseLogLevel(cfg.Logging.Level),
-		})
+		// Fall back to stderr to avoid corrupting stdout
+		log.SetOutput(os.Stderr)
+		return logging.New(logging.Options{
+			Output: os.Stderr,
+			Level:  parseLogLevel(cfg.Logging.Level),
+		}), nil
 	}
 
-	// Set as the default logger
-	logging.SetDefaultLogger(logger)
+	return logging.New(logging.Options{
+		Level: parseLogLevel(cfg.Logging.Level),
+	}), nil
+}
+
+// NewMCPServer creates a new MCP scheduler server
+func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecutor *command.CommandExecutor, agentExecutor *agent.AgentExecutor, resultStore model.ResultStore, logger *logging.Logger) (*MCPServer, error) {
+	// Create default config if not provided
+	if cfg == nil {
+		cfg = config.DefaultConfig()
+	}
 
 	// Validate transport mode
 	switch cfg.Server.TransportMode {
@@ -262,7 +262,7 @@ func (s *MCPServer) handleGetTask(_ context.Context, request *mcp.CallToolReques
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	s.logger.Debugf("Handling get_task request for task %s", taskID)
@@ -270,7 +270,7 @@ func (s *MCPServer) handleGetTask(_ context.Context, request *mcp.CallToolReques
 	// Get the task
 	task, err := s.scheduler.GetTask(taskID)
 	if err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	return createTaskResponse(task)
@@ -282,24 +282,24 @@ func (s *MCPServer) handleAddTask(_ context.Context, request *mcp.CallToolReques
 	var params TaskParams
 
 	if err := extractParams(request, &params); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	// Validate parameters
 	if err := validateShellTaskParams(params.Name, params.Command); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	s.logger.Debugf("Handling add_task request for task %s", params.Name)
 
 	// Create task
 	task := createBaseTask(params.Name, params.Schedule, params.Description, params.Enabled)
-	task.Type = model.TypeShellCommand.String()
+	task.Type = model.TypeShellCommand
 	task.Command = params.Command
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	return createTaskResponse(task)
@@ -310,24 +310,24 @@ func (s *MCPServer) handleAddAITask(_ context.Context, request *mcp.CallToolRequ
 	var params AITaskParams
 
 	if err := extractParams(request, &params); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	// Validate parameters
 	if err := validateAITaskParams(params.Name, params.Prompt); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	s.logger.Debugf("Handling add_ai_task request for task %s", params.Name)
 
 	// Create task
 	task := createBaseTask(params.Name, params.Schedule, params.Description, params.Enabled)
-	task.Type = model.TypeAI.String()
+	task.Type = model.TypeAI
 	task.Prompt = params.Prompt
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	return createTaskResponse(task)
@@ -358,11 +358,11 @@ func (s *MCPServer) handleUpdateTask(_ context.Context, request *mcp.CallToolReq
 	var params AITaskParams
 
 	if err := extractParams(request, &params); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	if params.ID == "" {
-		return createErrorResponse(errors.InvalidInput("task ID is required"))
+		return nil, errors.InvalidInput("task ID is required")
 	}
 
 	s.logger.Debugf("Handling update_task request for task %s", params.ID)
@@ -370,7 +370,7 @@ func (s *MCPServer) handleUpdateTask(_ context.Context, request *mcp.CallToolReq
 	// Get existing task
 	existingTask, err := s.scheduler.GetTask(params.ID)
 	if err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	// Update fields with provided values
@@ -378,7 +378,7 @@ func (s *MCPServer) handleUpdateTask(_ context.Context, request *mcp.CallToolReq
 
 	// Update task in scheduler
 	if err := s.scheduler.UpdateTask(existingTask); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	return createTaskResponse(existingTask)
@@ -405,16 +405,16 @@ func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
 
 	// Update task type if provided
 	if params.Type != "" {
-		if strings.EqualFold(params.Type, model.TypeAI.String()) {
-			task.Type = model.TypeAI.String()
-		} else if strings.EqualFold(params.Type, model.TypeShellCommand.String()) {
-			task.Type = model.TypeShellCommand.String()
+		if strings.EqualFold(params.Type, string(model.TypeAI)) {
+			task.Type = model.TypeAI
+		} else if strings.EqualFold(params.Type, string(model.TypeShellCommand)) {
+			task.Type = model.TypeShellCommand
 		}
 	}
 
 	// Only update Enabled if it's explicitly in the JSON
 	var rawParams map[string]interface{}
-	if err := utils.JsonUnmarshal(rawJSON, &rawParams); err == nil {
+	if err := json.Unmarshal(rawJSON, &rawParams); err == nil {
 		if _, exists := rawParams["enabled"]; exists {
 			task.Enabled = params.Enabled
 		}
@@ -428,14 +428,14 @@ func (s *MCPServer) handleRemoveTask(_ context.Context, request *mcp.CallToolReq
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	s.logger.Debugf("Handling remove_task request for task %s", taskID)
 
 	// Remove task
 	if err := s.scheduler.RemoveTask(taskID); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	return createSuccessResponse(fmt.Sprintf("Task %s removed successfully", taskID))
@@ -446,20 +446,20 @@ func (s *MCPServer) handleEnableTask(_ context.Context, request *mcp.CallToolReq
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	s.logger.Debugf("Handling enable_task request for task %s", taskID)
 
 	// Enable task
 	if err := s.scheduler.EnableTask(taskID); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	// Get updated task
 	task, err := s.scheduler.GetTask(taskID)
 	if err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	return createTaskResponse(task)
@@ -470,20 +470,20 @@ func (s *MCPServer) handleDisableTask(_ context.Context, request *mcp.CallToolRe
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	s.logger.Debugf("Handling disable_task request for task %s", taskID)
 
 	// Disable task
 	if err := s.scheduler.DisableTask(taskID); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	// Get updated task
 	task, err := s.scheduler.GetTask(taskID)
 	if err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	return createTaskResponse(task)
@@ -494,14 +494,14 @@ func (s *MCPServer) handleRunTask(_ context.Context, request *mcp.CallToolReques
 	// Extract task ID
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	s.logger.Debugf("Handling run_task request for task %s", taskID)
 
 	// Trigger immediate execution
 	if err := s.scheduler.RunTaskNow(taskID); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	return createSuccessResponse(fmt.Sprintf("Task %s triggered for immediate execution", taskID))
@@ -511,11 +511,11 @@ func (s *MCPServer) handleRunTask(_ context.Context, request *mcp.CallToolReques
 func (s *MCPServer) handleGetTaskResult(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params TaskResultParams
 	if err := extractParams(request, &params); err != nil {
-		return createErrorResponse(err)
+		return nil, err
 	}
 
 	if params.ID == "" {
-		return createErrorResponse(errors.InvalidInput("task ID is required"))
+		return nil, errors.InvalidInput("task ID is required")
 	}
 
 	s.logger.Debugf("Handling get_task_result request for task %s (limit=%d)", params.ID, params.Limit)
@@ -528,17 +528,17 @@ func (s *MCPServer) handleGetTaskResult(_ context.Context, request *mcp.CallTool
 	if limit == 1 {
 		result, found := s.GetTaskResult(params.ID)
 		if !found {
-			return createErrorResponse(errors.NotFound("result", params.ID))
+			return nil, errors.NotFound("result", params.ID)
 		}
 		return createResultResponse(result)
 	}
 
 	results, err := s.GetTaskResults(params.ID, limit)
 	if err != nil {
-		return createErrorResponse(errors.Internal(fmt.Errorf("failed to get results: %w", err)))
+		return nil, errors.Internal(fmt.Errorf("failed to get results: %w", err))
 	}
 	if len(results) == 0 {
-		return createErrorResponse(errors.NotFound("result", params.ID))
+		return nil, errors.NotFound("result", params.ID)
 	}
 	return createResultsResponse(results)
 }
@@ -552,12 +552,12 @@ func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.
 	s.logger.Debugf("Executing task with type: %s", taskType)
 
 	switch taskType {
-	case model.TypeAI.String():
+	case model.TypeAI:
 		// Use the agent executor for AI tasks
 		s.logger.Infof("Routing to AgentExecutor for AI task")
 		return s.agentExecutor.Execute(ctx, task, timeout)
 
-	case model.TypeShellCommand.String(), "":
+	case model.TypeShellCommand, "":
 		// Use the command executor for shell command tasks or when type is not specified
 		s.logger.Infof("Routing to CommandExecutor for shell command task")
 		return s.cmdExecutor.Execute(ctx, task, timeout)
@@ -568,38 +568,24 @@ func (s *MCPServer) Execute(ctx context.Context, task *model.Task, timeout time.
 	}
 }
 
-// GetTaskResult retrieves execution result for a task regardless of executor type.
-// It checks the persistent store first, then falls back to in-memory.
+// GetTaskResult retrieves the latest execution result for a task.
 func (s *MCPServer) GetTaskResult(taskID string) (*model.Result, bool) {
-	// Try the persistent store first.
-	if s.resultStore != nil {
-		if result, err := s.resultStore.GetLatestResult(taskID); err == nil && result != nil {
-			return result, true
-		}
+	if s.resultStore == nil {
+		return nil, false
 	}
-
-	// Fall back to in-memory results.
-	if result, exists := s.agentExecutor.GetTaskResult(taskID); exists {
-		return result, true
+	result, err := s.resultStore.GetLatestResult(taskID)
+	if err != nil || result == nil {
+		return nil, false
 	}
-
-	return s.cmdExecutor.GetTaskResult(taskID)
+	return result, true
 }
 
 // GetTaskResults retrieves multiple execution results for a task.
 func (s *MCPServer) GetTaskResults(taskID string, limit int) ([]*model.Result, error) {
-	if s.resultStore != nil {
-		return s.resultStore.GetResults(taskID, limit)
+	if s.resultStore == nil {
+		return nil, nil
 	}
-
-	// Fall back to in-memory (only latest available).
-	if result, exists := s.agentExecutor.GetTaskResult(taskID); exists {
-		return []*model.Result{result}, nil
-	}
-	if result, exists := s.cmdExecutor.GetTaskResult(taskID); exists {
-		return []*model.Result{result}, nil
-	}
-	return nil, nil
+	return s.resultStore.GetResults(taskID, limit)
 }
 
 // Helper function to parse log level

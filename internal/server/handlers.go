@@ -7,13 +7,12 @@ import (
 
 	"github.com/jolks/mcp-cron/internal/errors"
 	"github.com/jolks/mcp-cron/internal/model"
-	"github.com/jolks/mcp-cron/internal/utils"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 // extractParams extracts parameters from a tool request
 func extractParams(request *mcp.CallToolRequest, params interface{}) error {
-	if err := utils.JsonUnmarshal(request.Params.Arguments, params); err != nil {
+	if err := json.Unmarshal(request.Params.Arguments, params); err != nil {
 		return errors.InvalidInput(fmt.Sprintf("invalid parameters: %v", err))
 	}
 	return nil
@@ -52,13 +51,6 @@ func createSuccessResponse(message string) (*mcp.CallToolResult, error) {
 			},
 		},
 	}, nil
-}
-
-// createErrorResponse creates an error response
-func createErrorResponse(err error) (*mcp.CallToolResult, error) {
-	// Always return the original error as the second return value
-	// This ensures MCP protocol error handling works correctly
-	return nil, err
 }
 
 // createTaskResponse creates a response with a single task

@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -22,6 +23,10 @@ import (
 	"github.com/jolks/mcp-cron/internal/store"
 )
 
+func testLogger() *logging.Logger {
+	return logging.New(logging.Options{Output: io.Discard, Level: logging.Fatal})
+}
+
 // TestMCPServerCreation tests server creation with custom configs
 func TestMCPServerCreation(t *testing.T) {
 	// Test creating MCP server with custom config
@@ -39,14 +44,15 @@ func TestMCPServerCreation(t *testing.T) {
 	}
 
 	// Create a scheduler and executors first
-	cronScheduler := scheduler.NewScheduler(&cfg.Scheduler)
-	commandExecutor := command.NewCommandExecutor(nil)
+	logger := testLogger()
+	cronScheduler := scheduler.NewScheduler(&cfg.Scheduler, logger)
+	commandExecutor := command.NewCommandExecutor(nil, logger)
 
 	// Create agent executor with config
-	agentExecutor := agent.NewAgentExecutor(cfg, nil)
+	agentExecutor := agent.NewAgentExecutor(cfg, nil, logger)
 
 	// Create the server with custom config
-	mcpServer, err := server.NewMCPServer(cfg, cronScheduler, commandExecutor, agentExecutor, nil)
+	mcpServer, err := server.NewMCPServer(cfg, cronScheduler, commandExecutor, agentExecutor, nil, logger)
 
 	if err != nil {
 		t.Fatalf("Failed to create MCP server: %v", err)
@@ -89,13 +95,14 @@ func TestSchedulerContinuesAfterTransportExit(t *testing.T) {
 	cfg.Logging.FilePath = filepath.Join(tmpDir, "test.log")
 
 	// Build all components
-	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	logger := testLogger()
+	sched := scheduler.NewScheduler(&cfg.Scheduler, logger)
 	sched.SetTaskStore(resultStore)
 
-	cmdExec := command.NewCommandExecutor(resultStore)
-	agentExec := agent.NewAgentExecutor(cfg, resultStore)
+	cmdExec := command.NewCommandExecutor(resultStore, logger)
+	agentExec := agent.NewAgentExecutor(cfg, resultStore, logger)
 
-	srv, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec, resultStore)
+	srv, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec, resultStore, logger)
 	if err != nil {
 		t.Fatalf("NewMCPServer: %v", err)
 	}
@@ -153,7 +160,7 @@ func TestSchedulerContinuesAfterTransportExit(t *testing.T) {
 	task := &model.Task{
 		ID:        "post-exit-task",
 		Name:      "Post Exit Task",
-		Type:      model.TypeShellCommand.String(),
+		Type:      model.TypeShellCommand,
 		Command:   "echo test",
 		Enabled:   true,
 		Status:    model.StatusPending,

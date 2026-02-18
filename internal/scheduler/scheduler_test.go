@@ -4,6 +4,7 @@ package scheduler
 import (
 	"context"
 	"fmt"
+	"io"
 	"path/filepath"
 	"sync"
 	"sync/atomic"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/jolks/mcp-cron/internal/config"
+	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/jolks/mcp-cron/internal/store"
 )
@@ -28,6 +30,10 @@ func (m *MockTaskExecutor) Execute(ctx context.Context, task *model.Task, timeou
 	return nil
 }
 
+func testLogger() *logging.Logger {
+	return logging.New(logging.Options{Output: io.Discard, Level: logging.Fatal})
+}
+
 // createTestConfig creates a default config for testing
 func createTestConfig() *config.SchedulerConfig {
 	return &config.SchedulerConfig{
@@ -38,7 +44,7 @@ func createTestConfig() *config.SchedulerConfig {
 
 func TestNewScheduler(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	if s == nil {
 		t.Fatal("NewScheduler() returned nil")
 	}
@@ -49,7 +55,7 @@ func TestNewScheduler(t *testing.T) {
 
 func TestAddGetTask(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	now := time.Now()
 	task := &model.Task{
 		ID:          "test-task",
@@ -97,7 +103,7 @@ func TestAddGetTask(t *testing.T) {
 
 func TestAddDuplicateTask(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	task := &model.Task{
 		ID:          "test-task",
 		Name:        "Test Task",
@@ -123,7 +129,7 @@ func TestAddDuplicateTask(t *testing.T) {
 
 func TestListTasks(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	task1 := &model.Task{
 		ID:      "task1",
 		Name:    "Task 1",
@@ -150,7 +156,7 @@ func TestListTasks(t *testing.T) {
 
 func TestRemoveTask(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	task := &model.Task{
 		ID:      "test-task",
 		Name:    "Test Task",
@@ -176,7 +182,7 @@ func TestRemoveTask(t *testing.T) {
 
 func TestUpdateTask(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	task := &model.Task{
 		ID:          "test-task",
 		Name:        "Test Task",
@@ -218,7 +224,7 @@ func TestUpdateTask(t *testing.T) {
 
 func TestEnableDisableTask(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	task := &model.Task{
 		ID:          "test-task",
@@ -264,43 +270,10 @@ func TestEnableDisableTask(t *testing.T) {
 	}
 }
 
-// TestNewTask verifies that NewTask initializes time fields properly
-func TestNewTask(t *testing.T) {
-	beforeTime := time.Now().Add(-1 * time.Second)
-	task := NewTask()
-
-	// Check that CreatedAt and UpdatedAt are initialized
-	if task.CreatedAt.IsZero() {
-		t.Error("Expected CreatedAt to be initialized, but it's zero")
-	}
-
-	if task.UpdatedAt.IsZero() {
-		t.Error("Expected UpdatedAt to be initialized, but it's zero")
-	}
-
-	// Verify times are recent
-	if task.CreatedAt.Before(beforeTime) {
-		t.Errorf("Expected CreatedAt to be after %v, but was %v", beforeTime, task.CreatedAt)
-	}
-
-	if task.UpdatedAt.Before(beforeTime) {
-		t.Errorf("Expected UpdatedAt to be after %v, but was %v", beforeTime, task.UpdatedAt)
-	}
-
-	// Check default values
-	if task.Enabled != false {
-		t.Errorf("Expected Enabled to be false, but was %v", task.Enabled)
-	}
-
-	if task.Status != model.StatusPending {
-		t.Errorf("Expected Status to be %q, but was %q", model.StatusPending, task.Status)
-	}
-}
-
 // TestCronExpressionSupport confirms that both standard (minute-based) and non-standard (second-based) cron expressions are supported
 func TestCronExpressionSupport(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	// Test standard cron expression (every minute)
 	standardTask := &model.Task{
@@ -370,7 +343,7 @@ func TestCronExpressionSupport(t *testing.T) {
 // TestComputeNextRun verifies next run time computation from cron expressions
 func TestComputeNextRun(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	// Fix time for deterministic testing
 	fixedNow := time.Date(2024, 1, 15, 10, 30, 0, 0, time.Local)
@@ -419,7 +392,7 @@ func TestTaskExecutorPattern(t *testing.T) {
 		},
 	}
 
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	s.SetTaskStore(taskStore)
 	s.SetTaskExecutor(mockExecutor)
 
@@ -473,7 +446,7 @@ func TestTaskExecutorPattern(t *testing.T) {
 		},
 	}
 
-	s2 := NewScheduler(cfg)
+	s2 := NewScheduler(cfg, testLogger())
 	s2.SetTaskStore(taskStore)
 	s2.SetTaskExecutor(errorExecutor)
 
@@ -504,7 +477,7 @@ func TestTaskExecutorPattern(t *testing.T) {
 // TestMissingTaskExecutor verifies behavior when no executor is set
 func TestMissingTaskExecutor(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	// Adding an enabled task should succeed (next_run is computed by parser, no executor needed)
 	// but the task won't execute without an executor
@@ -561,7 +534,7 @@ func TestRemoveTaskStopsExecution(t *testing.T) {
 		},
 	}
 
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	s.SetTaskStore(taskStore)
 	s.SetTaskExecutor(mockExecutor)
 
@@ -644,7 +617,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	cfg := createTestConfig()
 
 	// Create first scheduler, add tasks
-	s1 := NewScheduler(cfg)
+	s1 := NewScheduler(cfg, testLogger())
 	s1.SetTaskStore(taskStore)
 	s1.SetTaskExecutor(&MockTaskExecutor{})
 
@@ -653,7 +626,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 		ID:          "persist-shell",
 		Name:        "Shell Task",
 		Description: "persisted shell task",
-		Type:        model.TypeShellCommand.String(),
+		Type:        model.TypeShellCommand,
 		Command:     "echo persisted",
 		Schedule:    "*/5 * * * *",
 		Enabled:     true,
@@ -664,7 +637,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	aiTask := &model.Task{
 		ID:          "persist-ai",
 		Name:        "AI Task",
-		Type:        model.TypeAI.String(),
+		Type:        model.TypeAI,
 		Prompt:      "Summarize the news",
 		Schedule:    "0 9 * * *",
 		Enabled:     false,
@@ -690,7 +663,7 @@ func TestPersistenceRoundTrip(t *testing.T) {
 	_ = s1.Stop()
 
 	// Create second scheduler with same store, load tasks
-	s2 := NewScheduler(cfg)
+	s2 := NewScheduler(cfg, testLogger())
 	s2.SetTaskStore(taskStore)
 	s2.SetTaskExecutor(&MockTaskExecutor{})
 
@@ -737,14 +710,14 @@ func TestPersistenceRemoveTask(t *testing.T) {
 	taskStore := newTestStoreForScheduler(t)
 	cfg := createTestConfig()
 
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	s.SetTaskStore(taskStore)
 
 	now := time.Now()
 	task := &model.Task{
 		ID:        "to-remove",
 		Name:      "Remove Me",
-		Type:      model.TypeShellCommand.String(),
+		Type:      model.TypeShellCommand,
 		Command:   "echo remove",
 		Schedule:  "* * * * *",
 		Enabled:   false,
@@ -775,14 +748,14 @@ func TestPersistenceUpdateTask(t *testing.T) {
 	taskStore := newTestStoreForScheduler(t)
 	cfg := createTestConfig()
 
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	s.SetTaskStore(taskStore)
 
 	now := time.Now()
 	task := &model.Task{
 		ID:        "to-update",
 		Name:      "Original",
-		Type:      model.TypeShellCommand.String(),
+		Type:      model.TypeShellCommand,
 		Command:   "echo old",
 		Schedule:  "* * * * *",
 		Enabled:   false,
@@ -798,7 +771,7 @@ func TestPersistenceUpdateTask(t *testing.T) {
 	updated := &model.Task{
 		ID:       "to-update",
 		Name:     "Updated",
-		Type:     model.TypeShellCommand.String(),
+		Type:     model.TypeShellCommand,
 		Command:  "echo new",
 		Schedule: "*/10 * * * *",
 		Enabled:  false,
@@ -829,7 +802,7 @@ func TestPersistenceEnableDisable(t *testing.T) {
 	taskStore := newTestStoreForScheduler(t)
 	cfg := createTestConfig()
 
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	s.SetTaskStore(taskStore)
 	s.SetTaskExecutor(&MockTaskExecutor{})
 
@@ -837,7 +810,7 @@ func TestPersistenceEnableDisable(t *testing.T) {
 	task := &model.Task{
 		ID:        "toggle-task",
 		Name:      "Toggle",
-		Type:      model.TypeShellCommand.String(),
+		Type:      model.TypeShellCommand,
 		Command:   "echo toggle",
 		Schedule:  "*/5 * * * *",
 		Enabled:   false,
@@ -891,7 +864,7 @@ func TestPollLoopExecutesDueTasks(t *testing.T) {
 		},
 	}
 
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	s.SetTaskStore(taskStore)
 	s.SetTaskExecutor(mockExecutor)
 
@@ -900,7 +873,7 @@ func TestPollLoopExecutesDueTasks(t *testing.T) {
 	task := &model.Task{
 		ID:        "due-task",
 		Name:      "Due Task",
-		Type:      model.TypeShellCommand.String(),
+		Type:      model.TypeShellCommand,
 		Command:   "echo due",
 		Schedule:  "* * * * * *",
 		Enabled:   true,
@@ -967,11 +940,11 @@ func TestPollLoopDedup(t *testing.T) {
 	}
 
 	// Create two schedulers sharing the same DB
-	s1 := NewScheduler(cfg)
+	s1 := NewScheduler(cfg, testLogger())
 	s1.SetTaskStore(taskStore1)
 	s1.SetTaskExecutor(makeExecutor())
 
-	s2 := NewScheduler(cfg)
+	s2 := NewScheduler(cfg, testLogger())
 	s2.SetTaskStore(taskStore2)
 	s2.SetTaskExecutor(makeExecutor())
 
@@ -981,7 +954,7 @@ func TestPollLoopDedup(t *testing.T) {
 	task := &model.Task{
 		ID:        "dedup-task",
 		Name:      "Dedup Task",
-		Type:      model.TypeShellCommand.String(),
+		Type:      model.TypeShellCommand,
 		Command:   "echo dedup",
 		Schedule:  "0 0 1 1 *", // Yearly — won't naturally become due again soon
 		Enabled:   true,
@@ -1028,14 +1001,14 @@ func TestNextRunPersistedOnAdd(t *testing.T) {
 	taskStore := newTestStoreForScheduler(t)
 	cfg := createTestConfig()
 
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	s.SetTaskStore(taskStore)
 
 	now := time.Now()
 	task := &model.Task{
 		ID:        "persist-nextrun",
 		Name:      "Persist NextRun",
-		Type:      model.TypeShellCommand.String(),
+		Type:      model.TypeShellCommand,
 		Command:   "echo test",
 		Schedule:  "*/5 * * * *",
 		Enabled:   true,
@@ -1065,7 +1038,7 @@ func TestNextRunPersistedOnAdd(t *testing.T) {
 
 func TestAddOnDemandTask(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	task := &model.Task{
 		ID:      "on-demand-1",
@@ -1095,7 +1068,7 @@ func TestAddOnDemandTask(t *testing.T) {
 
 func TestEnableOnDemandTask(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	task := &model.Task{
 		ID:      "on-demand-enable",
@@ -1128,7 +1101,7 @@ func TestEnableOnDemandTask(t *testing.T) {
 
 func TestUpdateOnDemandTask(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	task := &model.Task{
 		ID:      "on-demand-update",
@@ -1165,7 +1138,7 @@ func TestUpdateOnDemandTask(t *testing.T) {
 
 func TestRunTaskNow(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	// On-demand task
 	task := &model.Task{
@@ -1193,7 +1166,7 @@ func TestRunTaskNow(t *testing.T) {
 
 func TestRunTaskNowDisabledFails(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	task := &model.Task{
 		ID:      "run-now-disabled",
@@ -1215,7 +1188,7 @@ func TestRunTaskNowDisabledFails(t *testing.T) {
 
 func TestRunTaskNowNotFound(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	err := s.RunTaskNow("nonexistent")
 	if err == nil {
@@ -1225,7 +1198,7 @@ func TestRunTaskNowNotFound(t *testing.T) {
 
 func TestRunTaskNowScheduledTask(t *testing.T) {
 	cfg := createTestConfig()
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 
 	task := &model.Task{
 		ID:       "run-now-scheduled",
@@ -1276,7 +1249,7 @@ func TestStopWaitsForInFlightTasks(t *testing.T) {
 		},
 	}
 
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	s.SetTaskStore(taskStore)
 	s.SetTaskExecutor(mockExecutor)
 
@@ -1289,7 +1262,7 @@ func TestStopWaitsForInFlightTasks(t *testing.T) {
 	task := &model.Task{
 		ID:        "inflight-task",
 		Name:      "In-Flight Task",
-		Type:      model.TypeShellCommand.String(),
+		Type:      model.TypeShellCommand,
 		Command:   "echo slow",
 		Enabled:   true,
 		Status:    model.StatusPending,
@@ -1348,7 +1321,7 @@ func TestOnDemandTaskPollExecution(t *testing.T) {
 		},
 	}
 
-	s := NewScheduler(cfg)
+	s := NewScheduler(cfg, testLogger())
 	s.SetTaskStore(taskStore)
 	s.SetTaskExecutor(mockExecutor)
 
@@ -1362,7 +1335,7 @@ func TestOnDemandTaskPollExecution(t *testing.T) {
 	task := &model.Task{
 		ID:        "on-demand-poll",
 		Name:      "On-Demand Poll",
-		Type:      model.TypeShellCommand.String(),
+		Type:      model.TypeShellCommand,
 		Command:   "echo on-demand",
 		Enabled:   true,
 		Status:    model.StatusPending,

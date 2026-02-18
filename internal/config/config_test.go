@@ -57,9 +57,6 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.AI.AnthropicAPIKey != "" {
 		t.Errorf("Expected default Anthropic API key to be empty, got '%s'", cfg.AI.AnthropicAPIKey)
 	}
-	if cfg.AI.EnableOpenAITests != false {
-		t.Errorf("Expected default EnableOpenAITests to be false, got %v", cfg.AI.EnableOpenAITests)
-	}
 	if cfg.AI.Model != "gpt-4o" {
 		t.Errorf("Expected default AI model to be 'gpt-4o', got '%s'", cfg.AI.Model)
 	}
@@ -137,7 +134,6 @@ func TestFromEnv(t *testing.T) {
 		"MCP_CRON_AI_API_KEY":                os.Getenv("MCP_CRON_AI_API_KEY"),
 		"OPENAI_API_KEY":                     os.Getenv("OPENAI_API_KEY"),
 		"ANTHROPIC_API_KEY":                  os.Getenv("ANTHROPIC_API_KEY"),
-		"MCP_CRON_ENABLE_OPENAI_TESTS":       os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS"),
 		"MCP_CRON_AI_MODEL":                  os.Getenv("MCP_CRON_AI_MODEL"),
 		"MCP_CRON_AI_MAX_TOOL_ITERATIONS":    os.Getenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS"),
 		"MCP_CRON_MCP_CONFIG_FILE_PATH":      os.Getenv("MCP_CRON_MCP_CONFIG_FILE_PATH"),
@@ -172,7 +168,6 @@ func TestFromEnv(t *testing.T) {
 	_ = os.Setenv("MCP_CRON_AI_API_KEY", "generic-key")
 	_ = os.Setenv("OPENAI_API_KEY", "test-key")
 	_ = os.Setenv("ANTHROPIC_API_KEY", "anthropic-key")
-	_ = os.Setenv("MCP_CRON_ENABLE_OPENAI_TESTS", "true")
 	_ = os.Setenv("MCP_CRON_AI_MODEL", "gpt-4-turbo")
 	_ = os.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "30")
 	_ = os.Setenv("MCP_CRON_MCP_CONFIG_FILE_PATH", "/tmp/mcp.json")
@@ -215,9 +210,6 @@ func TestFromEnv(t *testing.T) {
 	}
 	if cfg.AI.AnthropicAPIKey != "anthropic-key" {
 		t.Errorf("Expected Anthropic API key 'anthropic-key', got '%s'", cfg.AI.AnthropicAPIKey)
-	}
-	if !cfg.AI.EnableOpenAITests {
-		t.Errorf("Expected EnableOpenAITests true, got false")
 	}
 	if cfg.AI.Model != "gpt-4-turbo" {
 		t.Errorf("Expected AI model 'gpt-4-turbo', got '%s'", cfg.AI.Model)

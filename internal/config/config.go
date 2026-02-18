@@ -96,9 +96,6 @@ type AIConfig struct {
 	// Loaded from ANTHROPIC_API_KEY.
 	AnthropicAPIKey string
 
-	// Enable OpenAI integration tests
-	EnableOpenAITests bool
-
 	// LLM model to use for AI tasks
 	Model string
 
@@ -134,13 +131,12 @@ func DefaultConfig() *Config {
 			DBPath: filepath.Join(home, ".mcp-cron", "results.db"),
 		},
 		AI: AIConfig{
-			Provider:          "openai",
-			BaseURL:           "",
-			APIKey:            "",
-			OpenAIAPIKey:      "",
-			AnthropicAPIKey:   "",
-			EnableOpenAITests: false,
-			Model:             "gpt-4o",
+			Provider:        "openai",
+			BaseURL:         "",
+			APIKey:          "",
+			OpenAIAPIKey:    "",
+			AnthropicAPIKey: "",
+			Model:           "gpt-4o",
 			MaxToolIterations: 20,
 			MCPConfigFilePath: filepath.Join(home, ".cursor", "mcp.json"),
 		},
@@ -250,10 +246,6 @@ func FromEnv(config *Config) {
 
 	if val := os.Getenv("ANTHROPIC_API_KEY"); val != "" {
 		config.AI.AnthropicAPIKey = val
-	}
-
-	if val := os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS"); val != "" {
-		config.AI.EnableOpenAITests = strings.ToLower(val) == "true"
 	}
 
 	if val := os.Getenv("MCP_CRON_AI_MODEL"); val != "" {

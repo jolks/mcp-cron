@@ -21,11 +21,11 @@ func TestTaskExecutorImplementation(t *testing.T) {
 	cfg := config.DefaultConfig()
 
 	// Create a mock scheduler
-	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	sched := scheduler.NewScheduler(&cfg.Scheduler, testLogger())
 
 	// Create executors
-	cmdExec := command.NewCommandExecutor(nil)
-	agentExec := agent.NewAgentExecutor(cfg, nil)
+	cmdExec := command.NewCommandExecutor(nil, testLogger())
+	agentExec := agent.NewAgentExecutor(cfg, nil, testLogger())
 
 	// Create a logger
 	logger := logging.New(logging.Options{
@@ -49,7 +49,7 @@ func TestTaskExecutorImplementation(t *testing.T) {
 		ID:          "test-task",
 		Name:        "Test Task",
 		Schedule:    "* * * * *",
-		Type:        model.TypeShellCommand.String(),
+		Type:        model.TypeShellCommand,
 		Command:     "echo hello",
 		Description: "Task for testing direct execution",
 		Enabled:     true,

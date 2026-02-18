@@ -9,6 +9,7 @@ import (
 
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/errors"
+	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/robfig/cron/v3"
 )
@@ -24,6 +25,7 @@ type Scheduler struct {
 	taskExecutor model.Executor
 	taskStore    model.TaskStore
 	config       *config.SchedulerConfig
+	logger       *logging.Logger
 	stopPoll     chan struct{}
 	taskWg       sync.WaitGroup // tracks in-flight task goroutines
 	// nowFunc allows tests to override time.Now
@@ -31,12 +33,13 @@ type Scheduler struct {
 }
 
 // NewScheduler creates a new scheduler instance
-func NewScheduler(cfg *config.SchedulerConfig) *Scheduler {
+func NewScheduler(cfg *config.SchedulerConfig, logger *logging.Logger) *Scheduler {
 	return &Scheduler{
 		parser: cron.NewParser(
 			cron.SecondOptional | cron.Minute | cron.Hour | cron.Dom | cron.Month | cron.Dow | cron.Descriptor),
 		tasks:    make(map[string]*model.Task),
 		config:   cfg,
+		logger:   logger,
 		stopPoll: make(chan struct{}),
 		nowFunc:  time.Now,
 	}
@@ -319,30 +322,19 @@ func (s *Scheduler) LoadTasks() error {
 			nextRun, err := s.computeNextRun(task.Schedule)
 			if err != nil {
 				task.Status = model.StatusFailed
-				fmt.Printf("Failed to compute next_run for persisted task %s: %v\n", task.ID, err)
+				s.logger.Warnf("Failed to compute next_run for persisted task %s: %v", task.ID, err)
 				continue
 			}
 			task.NextRun = nextRun
 			if s.taskStore != nil {
 				if err := s.taskStore.UpdateTask(task); err != nil {
-					fmt.Printf("Failed to persist next_run for task %s: %v\n", task.ID, err)
+					s.logger.Warnf("Failed to persist next_run for task %s: %v", task.ID, err)
 				}
 			}
 		}
 	}
 
 	return nil
-}
-
-// NewTask creates a new task with default values
-func NewTask() *model.Task {
-	now := time.Now()
-	return &model.Task{
-		Enabled:   false,
-		Status:    model.StatusPending,
-		CreatedAt: now,
-		UpdatedAt: now,
-	}
 }
 
 // computeNextRun parses the cron schedule and returns the next run time.
@@ -385,7 +377,7 @@ func (s *Scheduler) pollTick() {
 	// Refresh in-memory tasks from DB
 	tasks, err := s.taskStore.LoadTasks()
 	if err != nil {
-		fmt.Printf("Poll: failed to load tasks: %v\n", err)
+		s.logger.Errorf("Poll: failed to load tasks: %v", err)
 		return
 	}
 
@@ -407,7 +399,7 @@ func (s *Scheduler) pollTick() {
 	now := s.now()
 	dueTasks, err := s.taskStore.GetDueTasks(now)
 	if err != nil {
-		fmt.Printf("Poll: failed to get due tasks: %v\n", err)
+		s.logger.Errorf("Poll: failed to get due tasks: %v", err)
 		return
 	}
 
@@ -418,7 +410,7 @@ func (s *Scheduler) pollTick() {
 			var err error
 			newNextRun, err = s.computeNextRun(task.Schedule)
 			if err != nil {
-				fmt.Printf("Poll: failed to compute next_run for task %s: %v\n", task.ID, err)
+				s.logger.Errorf("Poll: failed to compute next_run for task %s: %v", task.ID, err)
 				continue
 			}
 		}
@@ -426,7 +418,7 @@ func (s *Scheduler) pollTick() {
 		// Optimistic lock: try to claim this execution
 		claimed, err := s.taskStore.AdvanceNextRun(task.ID, task.NextRun, newNextRun)
 		if err != nil {
-			fmt.Printf("Poll: failed to advance next_run for task %s: %v\n", task.ID, err)
+			s.logger.Errorf("Poll: failed to advance next_run for task %s: %v", task.ID, err)
 			continue
 		}
 

@@ -158,6 +158,13 @@ type Application struct {
 
 // createApp creates a new application instance
 func createApp(cfg *config.Config) (*Application, error) {
+	// Create logger first so all components can use it
+	logger, err := server.CreateLogger(cfg)
+	if err != nil {
+		return nil, err
+	}
+	logging.SetDefaultLogger(logger)
+
 	// Create result store
 	resultStore, err := store.NewSQLiteStore(cfg.Store.DBPath)
 	if err != nil {
@@ -165,20 +172,17 @@ func createApp(cfg *config.Config) (*Application, error) {
 	}
 
 	// Create components
-	cmdExec := command.NewCommandExecutor(resultStore)
-	agentExec := agent.NewAgentExecutor(cfg, resultStore)
-	sched := scheduler.NewScheduler(&cfg.Scheduler)
+	cmdExec := command.NewCommandExecutor(resultStore, logger)
+	agentExec := agent.NewAgentExecutor(cfg, resultStore, logger)
+	sched := scheduler.NewScheduler(&cfg.Scheduler, logger)
 	sched.SetTaskStore(resultStore)
 
 	// Create the MCP server
-	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec, resultStore)
+	mcpServer, err := server.NewMCPServer(cfg, sched, cmdExec, agentExec, resultStore, logger)
 	if err != nil {
 		_ = resultStore.Close()
 		return nil, err
 	}
-
-	// Get the default logger that was configured by the server
-	logger := logging.GetDefaultLogger()
 
 	// Create the application
 	app := &Application{

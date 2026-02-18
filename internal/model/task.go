@@ -32,16 +32,6 @@ const (
 	StatusDisabled TaskStatus = "disabled"
 )
 
-// String returns the string representation of the type, making it easier to use in string contexts
-func (t TaskType) String() string {
-	return string(t)
-}
-
-// String returns the string representation of the status, making it easier to use in string contexts
-func (s TaskStatus) String() string {
-	return string(s)
-}
-
 // Task represents a scheduled task
 type Task struct {
 	ID          string     `json:"id"`
@@ -51,7 +41,7 @@ type Task struct {
 	Prompt      string     `json:"prompt,omitempty" description:"prompt to use for AI"`
 	Schedule    string     `json:"schedule"`
 	Enabled     bool       `json:"enabled"`
-	Type        string     `json:"type"`
+	Type        TaskType   `json:"type"`
 	LastRun     time.Time  `json:"lastRun,omitempty"`
 	NextRun     time.Time  `json:"nextRun,omitempty"`
 	Status      TaskStatus `json:"status"`
@@ -75,11 +65,6 @@ type Result struct {
 // Executor defines the interface for executing tasks
 type Executor interface {
 	Execute(ctx context.Context, task *Task, timeout time.Duration) error
-}
-
-// ResultProvider defines an interface for getting task execution results
-type ResultProvider interface {
-	GetTaskResult(taskID string) (*Result, bool)
 }
 
 // TaskStore defines an interface for persisting and retrieving task definitions

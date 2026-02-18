@@ -30,7 +30,6 @@ internal/
   singleton/           # File-lock-based singleton per db-path (primary/secondary instance selection)
   sleep/               # Platform-specific system sleep prevention (macOS, Windows)
   store/               # SQLite store (persistent task definitions + result history, schema migrations)
-  utils/               # JSON unmarshal helper
 npm/
   mcp-cron/            # Main npm package — JS wrapper that spawns the platform binary
   mcp-cron-{os}-{arch}/ # Platform-specific packages (darwin/linux/windows × amd64/arm64)
@@ -52,6 +51,7 @@ scripts/
 - **AI task system message**: AI tasks receive a short system message (~450 chars) with their task ID, `get_task_result` usage instructions, and MCP namespace prefix mapping. Tool definitions are NOT listed (models get those via the API).
 - **Graceful shutdown**: Scheduler tracks in-flight task goroutines with a `sync.WaitGroup`; `Stop()` blocks until all running tasks complete and persist results. Shutdown timeout is derived from `DefaultTimeout + 1 minute`. Result store is closed last in `app.Stop()`, after scheduler and server.
 - **Singleton per db-path**: A file lock (`gofrs/flock`) on `<db-path>.lock` determines the **primary** instance. The first instance to acquire the lock is primary and enters keep-alive mode after transport exit (scheduler continues running). Subsequent instances on the same db-path are **secondary** — they serve their MCP request and exit when the transport closes. This prevents N lingering processes when MCP clients spawn mcp-cron per request.
+- **Logging**: Always use the `*logging.Logger` instance — never `fmt.Printf`, `log.Printf`, or `log.Println`. In stdio mode, any write to stdout corrupts the JSON-RPC stream. The logger is created early in `createApp` and passed to all components (scheduler, executors, server).
 - **Transport**: SSE (HTTP, default) or stdio (for CLI/Docker integration). In stdio mode, the primary instance keeps the scheduler running after the MCP client disconnects (stdin EOF). SIGTERM is ignored after transport exit (MCP clients send it during cleanup); only SIGINT (`kill -INT` / Ctrl+C) or SIGKILL triggers shutdown. Secondary instances shut down gracefully after transport exit (waiting for in-flight tasks to complete).
 
 ## MCP Tools Exposed

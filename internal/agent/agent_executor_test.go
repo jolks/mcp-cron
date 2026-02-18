@@ -5,14 +5,20 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/jolks/mcp-cron/internal/config"
+	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
 )
+
+func testLogger() *logging.Logger {
+	return logging.New(logging.Options{Output: io.Discard, Level: logging.Fatal})
+}
 
 // TestAgentExecutor is a test structure with a mockable RunTask function
 type TestAgentExecutor struct {
@@ -26,7 +32,7 @@ func NewTestAgentExecutor(mockFunc func(ctx context.Context, t *model.Task, cfg 
 	cfg := config.DefaultConfig()
 
 	return &TestAgentExecutor{
-		AgentExecutor: NewAgentExecutor(cfg, nil),
+		AgentExecutor: NewAgentExecutor(cfg, nil, testLogger()),
 		mockRunTask:   mockFunc,
 	}
 }
@@ -43,11 +49,6 @@ func (tae *TestAgentExecutor) ExecuteAgentTask(
 		TaskID:    taskID,
 		Prompt:    prompt,
 	}
-
-	// Store the result
-	tae.mu.Lock()
-	tae.results[taskID] = result
-	tae.mu.Unlock()
 
 	// Create a context with timeout
 	execCtx, cancel := context.WithTimeout(ctx, timeout)
@@ -114,15 +115,6 @@ func TestExecuteAgentTask(t *testing.T) {
 	if result.Output != mockOutput {
 		t.Errorf("Expected Output '%s', got '%s'", mockOutput, result.Output)
 	}
-
-	// Verify GetTaskResult
-	storedResult, exists := executor.GetTaskResult(taskID)
-	if !exists {
-		t.Error("Task result not stored in executor")
-	}
-	if storedResult != result {
-		t.Error("Stored result is not the same as returned result")
-	}
 }
 
 func TestExecuteAgentTaskWithError(t *testing.T) {
@@ -180,7 +172,7 @@ func TestExecute(t *testing.T) {
 	ctx := context.Background()
 	task := &model.Task{
 		ID:     "test-execute-task",
-		Type:   model.TypeAI.String(),
+		Type:   model.TypeAI,
 		Prompt: "Test prompt for execution",
 	}
 	timeout := 5 * time.Second
@@ -191,15 +183,6 @@ func TestExecute(t *testing.T) {
 	// Verify execution was successful
 	if err != nil {
 		t.Errorf("Execute failed: %v", err)
-	}
-
-	// Verify result was stored
-	result, exists := testExecutor.GetTaskResult(task.ID)
-	if !exists {
-		t.Error("Result not stored after Execute")
-	}
-	if result.Output != mockOutput {
-		t.Errorf("Expected output '%s', got '%s'", mockOutput, result.Output)
 	}
 }
 
