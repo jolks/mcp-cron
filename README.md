@@ -255,7 +255,7 @@ Tasks have the following structure:
 
 ```json
 {
-  "id": "task_1234567890",
+  "id": "task_a3f7b2c9e1d04f68",
   "name": "Example Task",
   "schedule": "0 */5 * * * *",
   "command": "echo 'Task executed!'",

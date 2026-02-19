@@ -3,6 +3,8 @@ package server
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -336,7 +338,9 @@ func (s *MCPServer) handleAddAITask(_ context.Context, request *mcp.CallToolRequ
 // createBaseTask creates a base task with common fields initialized
 func createBaseTask(name, schedule, description string, enabled bool) *model.Task {
 	now := time.Now()
-	taskID := fmt.Sprintf("task_%d", now.UnixNano())
+	var b [8]byte
+	_, _ = rand.Read(b[:])
+	taskID := "task_" + hex.EncodeToString(b[:])
 
 	return &model.Task{
 		ID:          taskID,
