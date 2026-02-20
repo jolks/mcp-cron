@@ -499,3 +499,77 @@ func TestTaskTypeHandling(t *testing.T) {
 		t.Errorf("Expected updated back type to be %s, got %s", model.TypeShellCommand, updatedBackTask.Type)
 	}
 }
+
+// TestUpdateTaskRemoveSchedule verifies that update_task can convert a scheduled task
+// to an on-demand task by explicitly setting schedule to an empty string.
+func TestUpdateTaskRemoveSchedule(t *testing.T) {
+	cfg := config.DefaultConfig()
+	sched := scheduler.NewScheduler(&cfg.Scheduler, testLogger())
+	cmdExec := command.NewCommandExecutor(nil, testLogger())
+	agentExec := agent.NewAgentExecutor(cfg, nil, testLogger())
+
+	server := &MCPServer{
+		scheduler:     sched,
+		cmdExecutor:   cmdExec,
+		agentExecutor: agentExec,
+		logger:        testLogger(),
+		config:        cfg,
+	}
+	sched.SetTaskExecutor(server)
+
+	// Create a scheduled task
+	addRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(`{
+			"name": "Scheduled Task",
+			"schedule": "*/5 * * * *",
+			"command": "echo hello",
+			"enabled": false
+		}`),
+		},
+	}
+
+	_, err := server.handleAddTask(context.Background(), addRequest)
+	if err != nil {
+		t.Fatalf("handleAddTask failed: %v", err)
+	}
+
+	tasks := sched.ListTasks()
+	if len(tasks) != 1 {
+		t.Fatalf("Expected 1 task, got %d", len(tasks))
+	}
+	taskID := tasks[0].ID
+
+	// Verify task has a schedule
+	task, err := sched.GetTask(taskID)
+	if err != nil {
+		t.Fatalf("GetTask failed: %v", err)
+	}
+	if task.Schedule != "*/5 * * * *" {
+		t.Fatalf("Expected schedule '*/5 * * * *', got %q", task.Schedule)
+	}
+
+	// Update task to remove schedule (convert to on-demand)
+	updateRequest := &mcp.CallToolRequest{
+		Params: &mcp.CallToolParamsRaw{
+			Arguments: json.RawMessage(fmt.Sprintf(`{
+			"id": "%s",
+			"schedule": ""
+		}`, taskID)),
+		},
+	}
+
+	_, err = server.handleUpdateTask(context.Background(), updateRequest)
+	if err != nil {
+		t.Fatalf("handleUpdateTask failed: %v", err)
+	}
+
+	// Verify schedule was cleared (task is now on-demand)
+	updated, err := sched.GetTask(taskID)
+	if err != nil {
+		t.Fatalf("GetTask after update failed: %v", err)
+	}
+	if updated.Schedule != "" {
+		t.Errorf("Expected schedule to be empty (on-demand), got %q", updated.Schedule)
+	}
+}

@@ -394,9 +394,6 @@ func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
 	if params.Name != "" {
 		task.Name = params.Name
 	}
-	if params.Schedule != "" {
-		task.Schedule = params.Schedule
-	}
 	if params.Command != "" {
 		task.Command = params.Command
 	}
@@ -416,9 +413,13 @@ func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
 		}
 	}
 
-	// Only update Enabled if it's explicitly in the JSON
+	// Only update Schedule and Enabled if explicitly in the JSON,
+	// since their zero values ("" and false) are valid updates.
 	var rawParams map[string]interface{}
 	if err := json.Unmarshal(rawJSON, &rawParams); err == nil {
+		if _, exists := rawParams["schedule"]; exists {
+			task.Schedule = params.Schedule
+		}
 		if _, exists := rawParams["enabled"]; exists {
 			task.Enabled = params.Enabled
 		}
