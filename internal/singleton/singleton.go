@@ -3,6 +3,8 @@ package singleton
 
 import (
 	"fmt"
+	"os"
+	"path/filepath"
 
 	"github.com/gofrs/flock"
 )
@@ -19,6 +21,11 @@ type Lock struct {
 // entering keep-alive mode.
 func TryAcquire(dbPath string) (*Lock, bool, error) {
 	lockPath := dbPath + ".lock"
+
+	// Ensure the parent directory exists (first run may not have it yet).
+	if err := os.MkdirAll(filepath.Dir(lockPath), 0755); err != nil {
+		return nil, false, fmt.Errorf("singleton: create lock dir: %w", err)
+	}
 
 	fl := flock.New(lockPath)
 	locked, err := fl.TryLock()

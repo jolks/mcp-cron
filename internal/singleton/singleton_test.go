@@ -100,6 +100,22 @@ func TestSecondInstanceIsSecondary(t *testing.T) {
 	}
 }
 
+// TestTryAcquireCreatesDirectory verifies that TryAcquire creates parent
+// directories if they don't exist (first-run scenario).
+func TestTryAcquireCreatesDirectory(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "nonexistent", "subdir")
+	dbPath := filepath.Join(dir, "test.db")
+
+	lock, isPrimary, err := TryAcquire(dbPath)
+	if err != nil {
+		t.Fatalf("TryAcquire with non-existent dir: %v", err)
+	}
+	if !isPrimary {
+		t.Fatal("expected isPrimary=true")
+	}
+	defer func() { _ = lock.Release() }()
+}
+
 // TestStaleLock verifies that when a lock holder is killed without cleanup
 // (simulating a crash), a new TryAcquire succeeds because the OS releases
 // the flock.
