@@ -120,6 +120,29 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestIsChatCompletionsGateway(t *testing.T) {
+	tests := []struct {
+		name    string
+		baseURL string
+		want    bool
+	}{
+		{"empty", "", false},
+		{"direct openai", "https://api.openai.com/v1", false},
+		{"kilo gateway", "https://api.kilo.ai/api/gateway", true},
+		{"kilo with path", "https://api.kilo.ai/v1", true},
+		{"ollama", "http://localhost:11434/v1", false},
+		{"groq", "https://api.groq.com/openai/v1", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := IsChatCompletionsGateway(tt.baseURL)
+			if got != tt.want {
+				t.Errorf("IsChatCompletionsGateway(%q) = %v, want %v", tt.baseURL, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestFromEnv(t *testing.T) {
 	// Save current environment variables
 	originalVars := map[string]string{

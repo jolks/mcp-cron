@@ -8,7 +8,7 @@ require (
 	github.com/anthropics/anthropic-sdk-go v1.22.0
 	github.com/gofrs/flock v0.13.0
 	github.com/modelcontextprotocol/go-sdk v1.3.0
-	github.com/openai/openai-go v0.1.0-beta.10
+	github.com/openai/openai-go/v3 v3.24.0
 	github.com/robfig/cron/v3 v3.0.1
 	modernc.org/sqlite v1.45.0
 )
