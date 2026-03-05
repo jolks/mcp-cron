@@ -8,7 +8,7 @@ import (
 	"github.com/jolks/mcp-cron/internal/config"
 )
 
-func TestNewChatProvider_DefaultIsOpenAI(t *testing.T) {
+func TestNewChatProvider_DefaultIsResponsesAPI(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.AI.OpenAIAPIKey = "sk-test"
 
@@ -16,8 +16,8 @@ func TestNewChatProvider_DefaultIsOpenAI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if _, ok := provider.(*OpenAIProvider); !ok {
-		t.Errorf("Expected *OpenAIProvider, got %T", provider)
+	if _, ok := provider.(*OpenAIResponsesProvider); !ok {
+		t.Errorf("Expected *OpenAIResponsesProvider, got %T", provider)
 	}
 }
 
@@ -30,8 +30,23 @@ func TestNewChatProvider_ExplicitOpenAI(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
+	if _, ok := provider.(*OpenAIResponsesProvider); !ok {
+		t.Errorf("Expected *OpenAIResponsesProvider, got %T", provider)
+	}
+}
+
+func TestNewChatProvider_GatewayUsesChatCompletions(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.AI.Provider = "openai"
+	cfg.AI.OpenAIAPIKey = "sk-test"
+	cfg.AI.BaseURL = "https://api.kilo.ai/api/gateway"
+
+	provider, err := newChatProvider(cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
 	if _, ok := provider.(*OpenAIProvider); !ok {
-		t.Errorf("Expected *OpenAIProvider, got %T", provider)
+		t.Errorf("Expected *OpenAIProvider for gateway URL, got %T", provider)
 	}
 }
 
@@ -73,8 +88,8 @@ func TestNewChatProvider_OpenAIFallbackToGenericKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if _, ok := provider.(*OpenAIProvider); !ok {
-		t.Errorf("Expected *OpenAIProvider, got %T", provider)
+	if _, ok := provider.(*OpenAIResponsesProvider); !ok {
+		t.Errorf("Expected *OpenAIResponsesProvider, got %T", provider)
 	}
 }
 
@@ -128,8 +143,8 @@ func TestNewChatProvider_OpenAIKeyTakesPrecedence(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
-	if _, ok := provider.(*OpenAIProvider); !ok {
-		t.Errorf("Expected *OpenAIProvider, got %T", provider)
+	if _, ok := provider.(*OpenAIResponsesProvider); !ok {
+		t.Errorf("Expected *OpenAIResponsesProvider, got %T", provider)
 	}
 }
 

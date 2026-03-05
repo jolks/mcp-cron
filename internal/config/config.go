@@ -14,6 +14,25 @@ import (
 // ServerName is the fixed server name used for MCP identity and self-reference detection.
 const ServerName = "mcp-cron"
 
+// ChatCompletionsOnlyGateways lists hostnames of API proxies that support only
+// the Chat Completions API (not the Responses API). When the configured base
+// URL matches one of these, the agent falls back to the Chat Completions provider.
+var ChatCompletionsOnlyGateways = []string{"api.kilo.ai"}
+
+// IsChatCompletionsGateway returns true if baseURL points to a known proxy
+// that only supports Chat Completions.
+func IsChatCompletionsGateway(baseURL string) bool {
+	if baseURL == "" {
+		return false
+	}
+	for _, gw := range ChatCompletionsOnlyGateways {
+		if strings.Contains(baseURL, gw) {
+			return true
+		}
+	}
+	return false
+}
+
 // Version is the default version, overridden at build time via:
 //
 //	-ldflags "-X github.com/jolks/mcp-cron/internal/config.Version=1.2.3"

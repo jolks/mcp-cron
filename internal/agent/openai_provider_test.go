@@ -4,7 +4,7 @@ package agent
 import (
 	"testing"
 
-	"github.com/openai/openai-go"
+	"github.com/openai/openai-go/v3"
 )
 
 func TestToOpenAITools(t *testing.T) {
@@ -38,11 +38,17 @@ func TestToOpenAITools(t *testing.T) {
 	if len(result) != 2 {
 		t.Fatalf("Expected 2 tools, got %d", len(result))
 	}
-	if result[0].Function.Name != "get_weather" {
-		t.Errorf("Expected tool name 'get_weather', got '%s'", result[0].Function.Name)
+	if result[0].OfFunction == nil {
+		t.Fatal("Expected OfFunction to be set")
 	}
-	if result[1].Function.Name != "list_files" {
-		t.Errorf("Expected tool name 'list_files', got '%s'", result[1].Function.Name)
+	if result[0].OfFunction.Function.Name != "get_weather" {
+		t.Errorf("Expected tool name 'get_weather', got '%s'", result[0].OfFunction.Function.Name)
+	}
+	if result[1].OfFunction == nil {
+		t.Fatal("Expected OfFunction to be set")
+	}
+	if result[1].OfFunction.Function.Name != "list_files" {
+		t.Errorf("Expected tool name 'list_files', got '%s'", result[1].OfFunction.Function.Name)
 	}
 }
 
@@ -92,14 +98,22 @@ func TestToOpenAIMessage_AssistantWithToolCalls(t *testing.T) {
 	if len(result.OfAssistant.ToolCalls) != 2 {
 		t.Fatalf("Expected 2 tool calls, got %d", len(result.OfAssistant.ToolCalls))
 	}
-	if result.OfAssistant.ToolCalls[0].ID != "call_1" {
-		t.Errorf("Expected tool call ID 'call_1', got '%s'", result.OfAssistant.ToolCalls[0].ID)
+	tc0 := result.OfAssistant.ToolCalls[0].OfFunction
+	if tc0 == nil {
+		t.Fatal("Expected OfFunction to be set for tool call 0")
 	}
-	if result.OfAssistant.ToolCalls[0].Function.Name != "get_weather" {
-		t.Errorf("Expected function name 'get_weather', got '%s'", result.OfAssistant.ToolCalls[0].Function.Name)
+	if tc0.ID != "call_1" {
+		t.Errorf("Expected tool call ID 'call_1', got '%s'", tc0.ID)
 	}
-	if result.OfAssistant.ToolCalls[1].Function.Arguments != `{}` {
-		t.Errorf("Expected arguments '{}', got '%s'", result.OfAssistant.ToolCalls[1].Function.Arguments)
+	if tc0.Function.Name != "get_weather" {
+		t.Errorf("Expected function name 'get_weather', got '%s'", tc0.Function.Name)
+	}
+	tc1 := result.OfAssistant.ToolCalls[1].OfFunction
+	if tc1 == nil {
+		t.Fatal("Expected OfFunction to be set for tool call 1")
+	}
+	if tc1.Function.Arguments != `{}` {
+		t.Errorf("Expected arguments '{}', got '%s'", tc1.Function.Arguments)
 	}
 }
 
@@ -124,10 +138,10 @@ func TestFromOpenAIMessage_TextOnly(t *testing.T) {
 func TestFromOpenAIMessage_WithToolCalls(t *testing.T) {
 	oaiMsg := openai.ChatCompletionMessage{
 		Content: "",
-		ToolCalls: []openai.ChatCompletionMessageToolCall{
+		ToolCalls: []openai.ChatCompletionMessageToolCallUnion{
 			{
 				ID: "call_abc",
-				Function: openai.ChatCompletionMessageToolCallFunction{
+				Function: openai.ChatCompletionMessageFunctionToolCallFunction{
 					Name:      "get_weather",
 					Arguments: `{"city":"London"}`,
 				},

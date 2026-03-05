@@ -4,14 +4,14 @@ package agent
 import (
 	"context"
 
-	"github.com/openai/openai-go"
-	"github.com/openai/openai-go/option"
-	"github.com/openai/openai-go/shared"
+	"github.com/openai/openai-go/v3"
+	"github.com/openai/openai-go/v3/option"
+	"github.com/openai/openai-go/v3/shared"
 )
 
-// OpenAIProvider implements ChatProvider using the OpenAI SDK.
-// It supports any OpenAI-compatible endpoint (OpenAI, Ollama, vLLM, Groq, etc.)
-// via a configurable base URL.
+// OpenAIProvider implements ChatProvider using the OpenAI Chat Completions API.
+// It supports any OpenAI-compatible endpoint (OpenAI, Ollama, vLLM, Groq, Kilo
+// Code Gateway, etc.) via a configurable base URL.
 type OpenAIProvider struct {
 	client *openai.Client
 }
@@ -54,14 +54,16 @@ func (p *OpenAIProvider) CreateCompletion(ctx context.Context, model string, sys
 
 // toOpenAITools converts provider-agnostic tool definitions to the OpenAI SDK
 // representation.
-func toOpenAITools(tools []ToolDefinition) []openai.ChatCompletionToolParam {
-	out := make([]openai.ChatCompletionToolParam, len(tools))
+func toOpenAITools(tools []ToolDefinition) []openai.ChatCompletionToolUnionParam {
+	out := make([]openai.ChatCompletionToolUnionParam, len(tools))
 	for i, t := range tools {
-		out[i] = openai.ChatCompletionToolParam{
-			Function: shared.FunctionDefinitionParam{
-				Name:        t.Name,
-				Description: openai.String(t.Description),
-				Parameters:  shared.FunctionParameters(t.Parameters),
+		out[i] = openai.ChatCompletionToolUnionParam{
+			OfFunction: &openai.ChatCompletionFunctionToolParam{
+				Function: shared.FunctionDefinitionParam{
+					Name:        t.Name,
+					Description: openai.String(t.Description),
+					Parameters:  shared.FunctionParameters(t.Parameters),
+				},
 			},
 		}
 	}
@@ -82,13 +84,15 @@ func toOpenAIMessage(m Message) openai.ChatCompletionMessageParamUnion {
 			asst.Content.OfString = openai.String(m.Content)
 		}
 		if len(m.ToolCalls) > 0 {
-			asst.ToolCalls = make([]openai.ChatCompletionMessageToolCallParam, len(m.ToolCalls))
+			asst.ToolCalls = make([]openai.ChatCompletionMessageToolCallUnionParam, len(m.ToolCalls))
 			for i, tc := range m.ToolCalls {
-				asst.ToolCalls[i] = openai.ChatCompletionMessageToolCallParam{
-					ID: tc.ID,
-					Function: openai.ChatCompletionMessageToolCallFunctionParam{
-						Name:      tc.Name,
-						Arguments: tc.Arguments,
+				asst.ToolCalls[i] = openai.ChatCompletionMessageToolCallUnionParam{
+					OfFunction: &openai.ChatCompletionMessageFunctionToolCallParam{
+						ID: tc.ID,
+						Function: openai.ChatCompletionMessageFunctionToolCallFunctionParam{
+							Name:      tc.Name,
+							Arguments: tc.Arguments,
+						},
 					},
 				}
 			}
