@@ -39,7 +39,7 @@ func TestNewMCPServer(t *testing.T) {
 		Server: config.ServerConfig{
 			Address:       "localhost",
 			Port:          8080,
-			TransportMode: "http",
+			TransportMode: config.TransportHTTP,
 		},
 		Scheduler: *createTestSchedulerConfig(),
 	}
@@ -75,7 +75,7 @@ func TestNewMCPServerWithCustomConfig(t *testing.T) {
 		Server: config.ServerConfig{
 			Address:       "127.0.0.1",
 			Port:          9090,
-			TransportMode: "http",
+			TransportMode: config.TransportHTTP,
 		},
 		Scheduler: *createTestSchedulerConfig(),
 	}
@@ -108,7 +108,7 @@ func TestMCPServerStartStop(t *testing.T) {
 	// Create a config
 	cfg := &config.Config{
 		Server: config.ServerConfig{
-			TransportMode: "stdio", // Use stdio to avoid network binding
+			TransportMode: config.TransportStdio, // Use stdio to avoid network binding
 		},
 		Scheduler: *createTestSchedulerConfig(),
 	}
@@ -151,7 +151,7 @@ func TestTaskHandlers(t *testing.T) {
 	// Create a config
 	cfg := &config.Config{
 		Server: config.ServerConfig{
-			TransportMode: "stdio", // Use stdio to avoid network binding
+			TransportMode: config.TransportStdio, // Use stdio to avoid network binding
 		},
 		Scheduler: *createTestSchedulerConfig(),
 	}
@@ -177,7 +177,7 @@ func TestTaskCreationTimeFields(t *testing.T) {
 	// Create a config
 	cfg := &config.Config{
 		Server: config.ServerConfig{
-			TransportMode: "stdio",
+			TransportMode: config.TransportStdio,
 		},
 		Scheduler: *createTestSchedulerConfig(),
 	}
@@ -269,7 +269,7 @@ func TestLogFilePath(t *testing.T) {
 	// Create a config
 	cfg := &config.Config{
 		Server: config.ServerConfig{
-			TransportMode: "stdio",
+			TransportMode: config.TransportStdio,
 		},
 		Scheduler: *createTestSchedulerConfig(),
 	}

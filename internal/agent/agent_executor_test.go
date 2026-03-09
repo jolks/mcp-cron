@@ -238,7 +238,7 @@ func TestRunTaskIntegrationAnthropic(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.AI.MCPConfigFilePath = filepath.Join(t.TempDir(), "mcp.json") // no real MCP servers
 	cfg.AI.Provider = "anthropic"
-	cfg.AI.Model = "claude-sonnet-4-5-20250929"
+	cfg.AI.Model = "claude-haiku-4-5-20251001"
 
 	cfg.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	if cfg.AI.AnthropicAPIKey == "" {
@@ -372,7 +372,7 @@ func TestRunTaskIntegration_InternalGetTaskResult_MCPNamespaceAnthropic(t *testi
 	cfg := config.DefaultConfig()
 	cfg.AI.MCPConfigFilePath = filepath.Join(t.TempDir(), "mcp.json") // no real MCP servers
 	cfg.AI.Provider = "anthropic"
-	cfg.AI.Model = "claude-sonnet-4-5-20250929"
+	cfg.AI.Model = "claude-haiku-4-5-20251001"
 	cfg.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	if cfg.AI.AnthropicAPIKey == "" {
 		t.Skip("ANTHROPIC_API_KEY environment variable not set")
@@ -491,124 +491,91 @@ func writeTestMCPConfig(t *testing.T, serverURL string) string {
 	return cfgPath
 }
 
-func TestRunTaskIntegrationListToolsOpenAI(t *testing.T) {
-	if os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS") != "true" {
-		t.Skip("Skipping OpenAI list-tools integration test. Set MCP_CRON_ENABLE_OPENAI_TESTS=true to run.")
+func TestRunTaskIntegrationListTools(t *testing.T) {
+	cases := []struct {
+		name    string
+		envFlag string
+		setup   func(t *testing.T, cfg *config.Config)
+	}{
+		{
+			name:    "OpenAI",
+			envFlag: "MCP_CRON_ENABLE_OPENAI_TESTS",
+			setup: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				cfg.AI.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
+				if cfg.AI.OpenAIAPIKey == "" {
+					t.Skip("OPENAI_API_KEY environment variable not set")
+				}
+			},
+		},
+		{
+			name:    "Anthropic",
+			envFlag: "MCP_CRON_ENABLE_ANTHROPIC_TESTS",
+			setup: func(t *testing.T, cfg *config.Config) {
+				t.Helper()
+				cfg.AI.Provider = "anthropic"
+				cfg.AI.Model = "claude-haiku-4-5-20251001"
+				cfg.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
+				if cfg.AI.AnthropicAPIKey == "" {
+					t.Skip("ANTHROPIC_API_KEY environment variable not set")
+				}
+			},
+		},
 	}
 
-	cfg := config.DefaultConfig()
-	cfg.AI.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
-	if cfg.AI.OpenAIAPIKey == "" {
-		t.Skip("OPENAI_API_KEY environment variable not set")
-	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if os.Getenv(tc.envFlag) != "true" {
+				t.Skipf("Skipping %s list-tools integration test. Set %s=true to run.", tc.name, tc.envFlag)
+			}
 
-	// Use a local test MCP server instead of real ~/.cursor/mcp.json
-	ts := startTestMCPServer(t)
-	cfg.AI.MCPConfigFilePath = writeTestMCPConfig(t, ts.URL)
+			cfg := config.DefaultConfig()
+			tc.setup(t, cfg)
 
-	// Verify tools load from the test server
-	tools, _, closeFn, err := buildToolsFromConfig(cfg)
-	if closeFn != nil {
-		defer closeFn()
-	}
-	if err != nil {
-		t.Fatalf("Failed to build tools: %v", err)
-	}
-	if len(tools) == 0 {
-		t.Fatal("Expected tools from test MCP server, got 0")
-	}
-	t.Logf("Loaded %d MCP tools from test server", len(tools))
+			// Use a local test MCP server instead of real ~/.cursor/mcp.json
+			ts := startTestMCPServer(t)
+			cfg.AI.MCPConfigFilePath = writeTestMCPConfig(t, ts.URL)
 
-	task := &model.Task{
-		ID:     "integration-test-openai-list-tools",
-		Prompt: "List all the tools you have available. Just list their names, one per line. Do not call any tool.",
-	}
+			// Verify tools load from the test server
+			tools, _, closeFn, err := buildToolsFromConfig(cfg)
+			if closeFn != nil {
+				defer closeFn()
+			}
+			if err != nil {
+				t.Fatalf("Failed to build tools: %v", err)
+			}
+			if len(tools) == 0 {
+				t.Fatal("Expected tools from test MCP server, got 0")
+			}
+			t.Logf("Loaded %d MCP tools from test server", len(tools))
 
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
+			task := &model.Task{
+				ID:     fmt.Sprintf("integration-test-%s-list-tools", strings.ToLower(tc.name)),
+				Prompt: "List all the tools you have available. Just list their names, one per line. Do not call any tool.",
+			}
 
-	output, err := RunTask(ctx, task, cfg, nil)
-	if err != nil {
-		t.Fatalf("RunTask failed: %v", err)
-	}
+			ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+			defer cancel()
 
-	if output == "" {
-		t.Fatal("Expected non-empty output")
-	}
+			output, err := RunTask(ctx, task, cfg, nil)
+			if err != nil {
+				t.Fatalf("RunTask failed: %v", err)
+			}
+			if output == "" {
+				t.Fatal("Expected non-empty output")
+			}
 
-	// Verify the AI mentions at least some of the known test tools
-	matched := 0
-	for _, td := range tools {
-		if strings.Contains(output, td.Name) {
-			matched++
-		}
+			matched := 0
+			for _, td := range tools {
+				if strings.Contains(output, td.Name) {
+					matched++
+				}
+			}
+			if matched == 0 {
+				t.Errorf("Expected output to mention at least one loaded tool, but none matched")
+			}
+			t.Logf("AI mentioned %d/%d loaded tools", matched, len(tools))
+			t.Logf("%s listed tools:\n%s", tc.name, output)
+		})
 	}
-	if matched == 0 {
-		t.Errorf("Expected output to mention at least one loaded tool, but none matched")
-	}
-	t.Logf("AI mentioned %d/%d loaded tools", matched, len(tools))
-
-	t.Logf("OpenAI listed tools:\n%s", output)
-}
-
-func TestRunTaskIntegrationListToolsAnthropic(t *testing.T) {
-	if os.Getenv("MCP_CRON_ENABLE_ANTHROPIC_TESTS") != "true" {
-		t.Skip("Skipping Anthropic list-tools integration test. Set MCP_CRON_ENABLE_ANTHROPIC_TESTS=true to run.")
-	}
-
-	cfg := config.DefaultConfig()
-	cfg.AI.Provider = "anthropic"
-	cfg.AI.Model = "claude-sonnet-4-5-20250929"
-	cfg.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
-	if cfg.AI.AnthropicAPIKey == "" {
-		t.Skip("ANTHROPIC_API_KEY environment variable not set")
-	}
-
-	// Use a local test MCP server instead of real ~/.cursor/mcp.json
-	ts := startTestMCPServer(t)
-	cfg.AI.MCPConfigFilePath = writeTestMCPConfig(t, ts.URL)
-
-	// Verify tools load from the test server
-	tools, _, closeFn, err := buildToolsFromConfig(cfg)
-	if closeFn != nil {
-		defer closeFn()
-	}
-	if err != nil {
-		t.Fatalf("Failed to build tools: %v", err)
-	}
-	if len(tools) == 0 {
-		t.Fatal("Expected tools from test MCP server, got 0")
-	}
-	t.Logf("Loaded %d MCP tools from test server", len(tools))
-
-	task := &model.Task{
-		ID:     "integration-test-anthropic-list-tools",
-		Prompt: "List all the tools you have available. Just list their names, one per line. Do not call any tool.",
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-
-	output, err := RunTask(ctx, task, cfg, nil)
-	if err != nil {
-		t.Fatalf("RunTask failed: %v", err)
-	}
-
-	if output == "" {
-		t.Fatal("Expected non-empty output")
-	}
-
-	// Verify the AI mentions at least some of the known test tools
-	matched := 0
-	for _, td := range tools {
-		if strings.Contains(output, td.Name) {
-			matched++
-		}
-	}
-	if matched == 0 {
-		t.Errorf("Expected output to mention at least one loaded tool, but none matched")
-	}
-	t.Logf("AI mentioned %d/%d loaded tools", matched, len(tools))
-
-	t.Logf("Anthropic listed tools:\n%s", output)
 }

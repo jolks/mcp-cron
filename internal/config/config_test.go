@@ -18,8 +18,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Server.Port != 8080 {
 		t.Errorf("Expected default server port to be 8080, got %d", cfg.Server.Port)
 	}
-	if cfg.Server.TransportMode != "http" {
-		t.Errorf("Expected default transport mode to be 'http', got '%s'", cfg.Server.TransportMode)
+	if cfg.Server.TransportMode != TransportHTTP {
+		t.Errorf("Expected default transport mode to be '%s', got '%s'", TransportHTTP, cfg.Server.TransportMode)
 	}
 
 	// Test Scheduler defaults
@@ -207,8 +207,8 @@ func TestFromEnv(t *testing.T) {
 	if cfg.Server.Port != 9090 {
 		t.Errorf("Expected server port 9090, got %d", cfg.Server.Port)
 	}
-	if cfg.Server.TransportMode != "stdio" {
-		t.Errorf("Expected transport mode 'stdio', got '%s'", cfg.Server.TransportMode)
+	if cfg.Server.TransportMode != TransportStdio {
+		t.Errorf("Expected transport mode '%s', got '%s'", TransportStdio, cfg.Server.TransportMode)
 	}
 	if cfg.Scheduler.DefaultTimeout != 5*time.Minute {
 		t.Errorf("Expected default timeout 5m, got %s", cfg.Scheduler.DefaultTimeout)

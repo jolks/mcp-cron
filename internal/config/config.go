@@ -14,6 +14,12 @@ import (
 // ServerName is the fixed server name used for MCP identity and self-reference detection.
 const ServerName = "mcp-cron"
 
+// Transport mode constants.
+const (
+	TransportHTTP  = "http"
+	TransportStdio = "stdio"
+)
+
 // ChatCompletionsOnlyGateways lists hostnames of API proxies that support only
 // the Chat Completions API (not the Responses API). When the configured base
 // URL matches one of these, the agent falls back to the Chat Completions provider.
@@ -136,7 +142,7 @@ func DefaultConfig() *Config {
 		Server: ServerConfig{
 			Address:       "localhost",
 			Port:          8080,
-			TransportMode: "http",
+			TransportMode: TransportHTTP,
 		},
 		Scheduler: SchedulerConfig{
 			DefaultTimeout: 10 * time.Minute,
@@ -169,8 +175,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("server port must be between 0 and 65535")
 	}
 
-	if c.Server.TransportMode != "http" && c.Server.TransportMode != "stdio" {
-		return fmt.Errorf("transport mode must be either 'http' or 'stdio'")
+	if c.Server.TransportMode != TransportHTTP && c.Server.TransportMode != TransportStdio {
+		return fmt.Errorf("transport mode must be either '%s' or '%s'", TransportHTTP, TransportStdio)
 	}
 
 	// Validate scheduler config

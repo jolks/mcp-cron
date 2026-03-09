@@ -301,7 +301,7 @@ func configureAIProvider(t *testing.T, srv *MCPServer) bool {
 
 	if anthropicEnabled {
 		srv.config.AI.Provider = "anthropic"
-		srv.config.AI.Model = "claude-sonnet-4-5-20250929"
+		srv.config.AI.Model = "claude-haiku-4-5-20251001"
 		srv.config.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	} else {
 		srv.config.AI.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")

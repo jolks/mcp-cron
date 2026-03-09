@@ -36,7 +36,7 @@ func TestMCPServerCreation(t *testing.T) {
 		Server: config.ServerConfig{
 			Address:       "127.0.0.1",
 			Port:          9999,
-			TransportMode: "stdio", // Use stdio to avoid network binding
+			TransportMode: config.TransportStdio, // Use stdio to avoid network binding
 		},
 		Scheduler: config.SchedulerConfig{
 			DefaultTimeout: config.DefaultConfig().Scheduler.DefaultTimeout,
@@ -91,7 +91,7 @@ func TestSchedulerContinuesAfterTransportExit(t *testing.T) {
 
 	cfg := config.DefaultConfig()
 	cfg.Scheduler.PollInterval = 100 * time.Millisecond
-	cfg.Server.TransportMode = "stdio"
+	cfg.Server.TransportMode = config.TransportStdio
 	cfg.Logging.FilePath = filepath.Join(tmpDir, "test.log")
 
 	// Build all components
