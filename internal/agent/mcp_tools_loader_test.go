@@ -127,7 +127,7 @@ func TestSelfReferenceDetection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect to test server: %v", err)
 	}
-	defer func() { _ = session.Close() }()
+	t.Cleanup(func() { _ = session.Close() })
 
 	res := session.InitializeResult()
 	if res == nil || res.ServerInfo == nil {
@@ -176,7 +176,7 @@ func TestStreamableHTTPTransport(t *testing.T) {
 		return srv
 	}, nil)
 	ts := httptest.NewServer(handler)
-	defer ts.Close()
+	t.Cleanup(ts.Close)
 
 	// Connect using StreamableClientTransport (same path buildToolsFromConfig takes for URL specs)
 	tp := &mcp.StreamableClientTransport{Endpoint: ts.URL}
@@ -185,7 +185,7 @@ func TestStreamableHTTPTransport(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
-	defer func() { _ = session.Close() }()
+	t.Cleanup(func() { _ = session.Close() })
 
 	// Verify tool discovery
 	resp, err := session.ListTools(context.Background(), nil)
@@ -244,7 +244,7 @@ func TestNonSelfServerNotSkipped(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Failed to connect: %v", err)
 	}
-	defer func() { _ = session.Close() }()
+	t.Cleanup(func() { _ = session.Close() })
 
 	res := session.InitializeResult()
 	if res == nil || res.ServerInfo == nil {

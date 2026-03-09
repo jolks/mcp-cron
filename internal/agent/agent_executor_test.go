@@ -420,7 +420,7 @@ func TestRunTaskIntegration_InternalGetTaskResult_MCPNamespaceAnthropic(t *testi
 }
 
 // startTestMCPServer creates a test MCP server with known tools and returns
-// the httptest server URL. The caller should defer ts.Close().
+// the httptest server. Cleanup is registered via t.Cleanup.
 func startTestMCPServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	srv := mcp.NewServer(&mcp.Implementation{Name: "test-tools-server", Version: "1.0.0"}, nil)
