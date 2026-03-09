@@ -49,6 +49,9 @@ MCP_CRON_ENABLE_ANTHROPIC_TESTS=true go test ./...
 | `TestIntegration_AITaskGetTaskResult` | AI task calls internal get_task_result to access prior execution output |
 | `TestRunTaskIntegration_InternalGetTaskResult_MCPNamespace` | OpenAI model discovers get_task_result from system message alone (no tool name in prompt) |
 | `TestRunTaskIntegration_InternalGetTaskResult_MCPNamespaceAnthropic` | Anthropic model discovers get_task_result from system message alone |
+| `TestRunTaskIntegration` | OpenAI AI task execution with config-based setup |
+| `TestRunTaskIntegrationAnthropic` | Anthropic AI task execution with config-based setup |
+| `TestRunTaskIntegrationListTools` | AI task lists available MCP tools (OpenAI + Anthropic subtests) |
 | `TestStopWaitsForInFlightTasks` | Scheduler Stop() blocks until in-flight task goroutines complete |
 | `TestSchedulerContinuesAfterTransportExit` | Scheduler poll loop keeps running after MCP transport exits (stdin EOF) |
 
