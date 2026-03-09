@@ -18,8 +18,8 @@ func TestDefaultConfig(t *testing.T) {
 	if cfg.Server.Port != 8080 {
 		t.Errorf("Expected default server port to be 8080, got %d", cfg.Server.Port)
 	}
-	if cfg.Server.TransportMode != "sse" {
-		t.Errorf("Expected default transport mode to be 'sse', got '%s'", cfg.Server.TransportMode)
+	if cfg.Server.TransportMode != "http" {
+		t.Errorf("Expected default transport mode to be 'http', got '%s'", cfg.Server.TransportMode)
 	}
 
 	// Test Scheduler defaults

@@ -105,7 +105,7 @@ go build -o mcp-cron cmd/mcp-cron/main.go
 
 ## Usage
 The server supports two transport modes:
-- **SSE (Server-Sent Events)**: Default HTTP-based transport for browser and network clients
+- **HTTP (Streamable HTTP)**: Default HTTP-based transport for browser and network clients
 - **stdio**: Standard input/output transport for direct piping and inter-process communication
 
 | Client | Config File Location |
@@ -114,10 +114,10 @@ The server supports two transport modes:
 | Claude Desktop (Mac) | `~/Library/Application Support/Claude/claude_desktop_config.json`|
 | Claude Desktop (Windows) | `%APPDATA%\Claude\claude_desktop_config.json` |
 
-### SSE
+### HTTP (Streamable HTTP)
 
 ```bash
-# Start the server with HTTP SSE transport (default mode)
+# Start the server with Streamable HTTP transport (default mode)
 # Default to localhost:8080
 ./mcp-cron
 
@@ -129,7 +129,7 @@ Config file example
 {
   "mcpServers": {
     "mcp-cron": {
-      "url": "http://localhost:8080/sse"
+      "url": "http://localhost:8080"
     }
   }
 }
@@ -164,7 +164,7 @@ The following command line arguments are supported:
 |----------|-------------|---------|
 | `--address` | The address to bind the server to | `localhost` |
 | `--port` | The port to bind the server to | `8080` |
-| `--transport` | Transport mode: `sse` or `stdio` | `sse` |
+| `--transport` | Transport mode: `http` or `stdio` | `http` |
 | `--log-level` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `--log-file` | Log file path | stdout |
 | `--version` | Show version information and exit | `false` |
@@ -185,7 +185,7 @@ The following environment variables are supported:
 |----------------------|-------------|---------|
 | `MCP_CRON_SERVER_ADDRESS` | The address to bind the server to | `localhost` |
 | `MCP_CRON_SERVER_PORT` | The port to bind the server to | `8080` |
-| `MCP_CRON_SERVER_TRANSPORT` | Transport mode: `sse` or `stdio` | `sse` |
+| `MCP_CRON_SERVER_TRANSPORT` | Transport mode: `http` or `stdio` | `http` |
 | `MCP_CRON_SERVER_NAME` | **Deprecated** — ignored; the server name is fixed to ensure self-reference detection works correctly | - |
 | `MCP_CRON_SERVER_VERSION` | **Deprecated** — ignored; version is set at build time via ldflags | - |
 | `MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT` | Default timeout for task execution | `10m` |
@@ -227,7 +227,7 @@ MCP_CRON_PREVENT_SLEEP=true mcp-cron --transport stdio
 
 ### Logging
 
-When running with the default SSE transport, logs are output to the console. 
+When running with the default HTTP transport, logs are output to the console. 
 
 When running with stdio transport, logs are redirected to a `mcp-cron.log` log file to prevent interference with the JSON-RPC protocol:
 - Log file location: Same location as `mcp-cron` binary.

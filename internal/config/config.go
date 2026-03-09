@@ -67,7 +67,7 @@ type ServerConfig struct {
 	// Port to listen on
 	Port int
 
-	// Transport mode (sse, stdio)
+	// Transport mode (http, stdio)
 	TransportMode string
 }
 
@@ -136,7 +136,7 @@ func DefaultConfig() *Config {
 		Server: ServerConfig{
 			Address:       "localhost",
 			Port:          8080,
-			TransportMode: "sse",
+			TransportMode: "http",
 		},
 		Scheduler: SchedulerConfig{
 			DefaultTimeout: 10 * time.Minute,
@@ -169,8 +169,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("server port must be between 0 and 65535")
 	}
 
-	if c.Server.TransportMode != "sse" && c.Server.TransportMode != "stdio" {
-		return fmt.Errorf("transport mode must be either 'sse' or 'stdio'")
+	if c.Server.TransportMode != "http" && c.Server.TransportMode != "stdio" {
+		return fmt.Errorf("transport mode must be either 'http' or 'stdio'")
 	}
 
 	// Validate scheduler config

@@ -26,7 +26,7 @@ import (
 var (
 	address         = flag.String("address", "", "The address to bind the server to")
 	port            = flag.Int("port", 0, "The port to bind the server to")
-	transport       = flag.String("transport", "", "Transport mode: sse or stdio")
+	transport       = flag.String("transport", "", "Transport mode: http or stdio")
 	logLevel        = flag.String("log-level", "", "Logging level: debug, info, warn, error, fatal")
 	logFile         = flag.String("log-file", "", "Log file path (default: stdout)")
 	version         = flag.Bool("version", false, "Show version information and exit")
