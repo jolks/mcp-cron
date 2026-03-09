@@ -40,6 +40,7 @@ func createIntegrationTestServer(t *testing.T, opts ...integrationOpts) *MCPServ
 	}
 
 	cfg := config.DefaultConfig()
+	cfg.AI.MCPConfigFilePath = filepath.Join(t.TempDir(), "mcp.json") // no real MCP servers
 	if opt.pollInterval > 0 {
 		cfg.Scheduler.PollInterval = opt.pollInterval
 	}
@@ -113,6 +114,7 @@ func parseResponse(t *testing.T, result *mcp.CallToolResult, dest interface{}) {
 	t.Helper()
 	if result == nil {
 		t.Fatal("result is nil")
+		return
 	}
 	if len(result.Content) == 0 {
 		t.Fatal("result has no content")
@@ -299,7 +301,7 @@ func configureAIProvider(t *testing.T, srv *MCPServer) bool {
 
 	if anthropicEnabled {
 		srv.config.AI.Provider = "anthropic"
-		srv.config.AI.Model = "claude-sonnet-4-5-20250929"
+		srv.config.AI.Model = "claude-haiku-4-5-20251001"
 		srv.config.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	} else {
 		srv.config.AI.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")

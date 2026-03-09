@@ -87,7 +87,7 @@ func CreateLogger(cfg *config.Config) (*logging.Logger, error) {
 		return logger, nil
 	}
 
-	if cfg.Server.TransportMode == "stdio" {
+	if cfg.Server.TransportMode == config.TransportStdio {
 		// For stdio transport, all logging must go to a file to avoid
 		// corrupting the JSON-RPC stream on stdout
 		execPath, err := os.Executable()
@@ -128,10 +128,10 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 
 	// Validate transport mode
 	switch cfg.Server.TransportMode {
-	case "stdio":
+	case config.TransportStdio:
 		logger.Infof("Using stdio transport")
-	case "sse":
-		logger.Infof("Using SSE transport on %s:%d", cfg.Server.Address, cfg.Server.Port)
+	case config.TransportHTTP:
+		logger.Infof("Using Streamable HTTP transport on %s:%d", cfg.Server.Address, cfg.Server.Port)
 	default:
 		return nil, errors.InvalidInput(fmt.Sprintf("unsupported transport mode: %s", cfg.Server.TransportMode))
 	}
@@ -168,7 +168,7 @@ func (s *MCPServer) Start(ctx context.Context) error {
 	s.registerToolsDeclarative()
 
 	switch s.config.Server.TransportMode {
-	case "stdio":
+	case config.TransportStdio:
 		runCtx, cancel := context.WithCancel(ctx)
 		s.cancel = cancel
 		s.wg.Add(1)
@@ -180,9 +180,9 @@ func (s *MCPServer) Start(ctx context.Context) error {
 			// Signal that stdio transport has exited (e.g. stdin closed)
 			close(s.stopCh)
 		}()
-	case "sse":
+	case config.TransportHTTP:
 		addr := fmt.Sprintf("%s:%d", s.address, s.port)
-		handler := mcp.NewSSEHandler(func(_ *http.Request) *mcp.Server {
+		handler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 			return s.server
 		}, nil)
 		s.httpServer = &http.Server{Addr: addr, Handler: handler}

@@ -31,6 +31,7 @@ func TestExecuteCommand(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("ExecuteCommand returned nil result")
+		return
 	}
 	if result.ExitCode != 0 {
 		t.Errorf("Expected exit code 0, got %d", result.ExitCode)
@@ -52,6 +53,7 @@ func TestExecuteInvalidCommand(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("ExecuteCommand returned nil result")
+		return
 	}
 	if result.ExitCode == 0 {
 		t.Error("Expected non-zero exit code for invalid command")
@@ -70,6 +72,7 @@ func TestCommandTimeout(t *testing.T) {
 
 	if result == nil {
 		t.Fatal("ExecuteCommand returned nil result")
+		return
 	}
 	if result.ExitCode == 0 {
 		t.Error("Expected non-zero exit code for timed out command")

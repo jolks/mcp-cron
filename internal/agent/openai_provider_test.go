@@ -101,6 +101,7 @@ func TestToOpenAIMessage_AssistantWithToolCalls(t *testing.T) {
 	tc0 := result.OfAssistant.ToolCalls[0].OfFunction
 	if tc0 == nil {
 		t.Fatal("Expected OfFunction to be set for tool call 0")
+		return
 	}
 	if tc0.ID != "call_1" {
 		t.Errorf("Expected tool call ID 'call_1', got '%s'", tc0.ID)
@@ -111,6 +112,7 @@ func TestToOpenAIMessage_AssistantWithToolCalls(t *testing.T) {
 	tc1 := result.OfAssistant.ToolCalls[1].OfFunction
 	if tc1 == nil {
 		t.Fatal("Expected OfFunction to be set for tool call 1")
+		return
 	}
 	if tc1.Function.Arguments != `{}` {
 		t.Errorf("Expected arguments '{}', got '%s'", tc1.Function.Arguments)
