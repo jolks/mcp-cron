@@ -3,10 +3,14 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -14,6 +18,7 @@ import (
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/jolks/mcp-cron/internal/model"
+	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 func testLogger() *logging.Logger {
@@ -193,10 +198,9 @@ func TestRunTaskIntegration(t *testing.T) {
 		t.Skip("Skipping OpenAI integration test. Set MCP_CRON_ENABLE_OPENAI_TESTS=true to run.")
 	}
 
-	// Create a default config for testing
 	cfg := config.DefaultConfig()
+	cfg.AI.MCPConfigFilePath = filepath.Join(t.TempDir(), "mcp.json") // no real MCP servers
 
-	// Set the API key from environment for the test
 	cfg.AI.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	if cfg.AI.OpenAIAPIKey == "" {
 		t.Skip("OPENAI_API_KEY environment variable not set")
@@ -231,12 +235,11 @@ func TestRunTaskIntegrationAnthropic(t *testing.T) {
 		t.Skip("Skipping Anthropic integration test. Set MCP_CRON_ENABLE_ANTHROPIC_TESTS=true to run.")
 	}
 
-	// Create a default config for testing
 	cfg := config.DefaultConfig()
+	cfg.AI.MCPConfigFilePath = filepath.Join(t.TempDir(), "mcp.json") // no real MCP servers
 	cfg.AI.Provider = "anthropic"
 	cfg.AI.Model = "claude-sonnet-4-5-20250929"
 
-	// Set the API key from environment for the test
 	cfg.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
 	if cfg.AI.AnthropicAPIKey == "" {
 		t.Skip("ANTHROPIC_API_KEY environment variable not set")
@@ -307,6 +310,7 @@ func TestRunTaskIntegration_InternalGetTaskResult_MCPNamespace(t *testing.T) {
 	}
 
 	cfg := config.DefaultConfig()
+	cfg.AI.MCPConfigFilePath = filepath.Join(t.TempDir(), "mcp.json") // no real MCP servers
 	cfg.AI.OpenAIAPIKey = os.Getenv("OPENAI_API_KEY")
 	if cfg.AI.OpenAIAPIKey == "" {
 		t.Skip("OPENAI_API_KEY environment variable not set")
@@ -366,6 +370,7 @@ func TestRunTaskIntegration_InternalGetTaskResult_MCPNamespaceAnthropic(t *testi
 	}
 
 	cfg := config.DefaultConfig()
+	cfg.AI.MCPConfigFilePath = filepath.Join(t.TempDir(), "mcp.json") // no real MCP servers
 	cfg.AI.Provider = "anthropic"
 	cfg.AI.Model = "claude-sonnet-4-5-20250929"
 	cfg.AI.AnthropicAPIKey = os.Getenv("ANTHROPIC_API_KEY")
@@ -414,6 +419,78 @@ func TestRunTaskIntegration_InternalGetTaskResult_MCPNamespaceAnthropic(t *testi
 	}
 }
 
+// startTestMCPServer creates a test MCP server with known tools and returns
+// the httptest server URL. The caller should defer ts.Close().
+func startTestMCPServer(t *testing.T) *httptest.Server {
+	t.Helper()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "test-tools-server", Version: "1.0.0"}, nil)
+	srv.AddTool(&mcp.Tool{
+		Name:        "get_weather",
+		Description: "Get current weather for a location",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"location": map[string]interface{}{
+					"type":        "string",
+					"description": "City name",
+				},
+			},
+			"required": []string{"location"},
+		},
+	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Sunny, 72F"}},
+		}, nil
+	})
+	srv.AddTool(&mcp.Tool{
+		Name:        "calculate",
+		Description: "Perform a calculation",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"expression": map[string]interface{}{
+					"type":        "string",
+					"description": "Math expression",
+				},
+			},
+			"required": []string{"expression"},
+		},
+	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "42"}},
+		}, nil
+	})
+
+	handler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+		return srv
+	}, nil)
+	ts := httptest.NewServer(handler)
+	t.Cleanup(ts.Close)
+	return ts
+}
+
+// writeTestMCPConfig writes a temporary MCP config JSON pointing to the given
+// server URL and returns the config file path.
+func writeTestMCPConfig(t *testing.T, serverURL string) string {
+	t.Helper()
+	cfg := map[string]interface{}{
+		"mcpServers": map[string]interface{}{
+			"test-server": map[string]interface{}{
+				"url": serverURL,
+			},
+		},
+	}
+	data, err := json.Marshal(cfg)
+	if err != nil {
+		t.Fatalf("Failed to marshal test MCP config: %v", err)
+	}
+	cfgPath := filepath.Join(t.TempDir(), "mcp.json")
+	if err := os.WriteFile(cfgPath, data, 0644); err != nil {
+		t.Fatalf("Failed to write test MCP config: %v", err)
+	}
+	return cfgPath
+}
+
 func TestRunTaskIntegrationListToolsOpenAI(t *testing.T) {
 	if os.Getenv("MCP_CRON_ENABLE_OPENAI_TESTS") != "true" {
 		t.Skip("Skipping OpenAI list-tools integration test. Set MCP_CRON_ENABLE_OPENAI_TESTS=true to run.")
@@ -425,15 +502,22 @@ func TestRunTaskIntegrationListToolsOpenAI(t *testing.T) {
 		t.Skip("OPENAI_API_KEY environment variable not set")
 	}
 
-	// Verify MCP tools are actually available
-	tools, _, err := buildToolsFromConfig(cfg)
+	// Use a local test MCP server instead of real ~/.cursor/mcp.json
+	ts := startTestMCPServer(t)
+	cfg.AI.MCPConfigFilePath = writeTestMCPConfig(t, ts.URL)
+
+	// Verify tools load from the test server
+	tools, _, closeFn, err := buildToolsFromConfig(cfg)
+	if closeFn != nil {
+		defer closeFn()
+	}
 	if err != nil {
 		t.Fatalf("Failed to build tools: %v", err)
 	}
 	if len(tools) == 0 {
-		t.Skip("No MCP tools available — cannot test tool visibility")
+		t.Fatal("Expected tools from test MCP server, got 0")
 	}
-	t.Logf("Loaded %d MCP tools", len(tools))
+	t.Logf("Loaded %d MCP tools from test server", len(tools))
 
 	task := &model.Task{
 		ID:     "integration-test-openai-list-tools",
@@ -452,7 +536,7 @@ func TestRunTaskIntegrationListToolsOpenAI(t *testing.T) {
 		t.Fatal("Expected non-empty output")
 	}
 
-	// Verify the AI mentions at least some of the actually loaded tools
+	// Verify the AI mentions at least some of the known test tools
 	matched := 0
 	for _, td := range tools {
 		if strings.Contains(output, td.Name) {
@@ -480,15 +564,22 @@ func TestRunTaskIntegrationListToolsAnthropic(t *testing.T) {
 		t.Skip("ANTHROPIC_API_KEY environment variable not set")
 	}
 
-	// Verify MCP tools are actually available
-	tools, _, err := buildToolsFromConfig(cfg)
+	// Use a local test MCP server instead of real ~/.cursor/mcp.json
+	ts := startTestMCPServer(t)
+	cfg.AI.MCPConfigFilePath = writeTestMCPConfig(t, ts.URL)
+
+	// Verify tools load from the test server
+	tools, _, closeFn, err := buildToolsFromConfig(cfg)
+	if closeFn != nil {
+		defer closeFn()
+	}
 	if err != nil {
 		t.Fatalf("Failed to build tools: %v", err)
 	}
 	if len(tools) == 0 {
-		t.Skip("No MCP tools available — cannot test tool visibility")
+		t.Fatal("Expected tools from test MCP server, got 0")
 	}
-	t.Logf("Loaded %d MCP tools", len(tools))
+	t.Logf("Loaded %d MCP tools from test server", len(tools))
 
 	task := &model.Task{
 		ID:     "integration-test-anthropic-list-tools",
@@ -507,7 +598,7 @@ func TestRunTaskIntegrationListToolsAnthropic(t *testing.T) {
 		t.Fatal("Expected non-empty output")
 	}
 
-	// Verify the AI mentions at least some of the actually loaded tools
+	// Verify the AI mentions at least some of the known test tools
 	matched := 0
 	for _, td := range tools {
 		if strings.Contains(output, td.Name) {

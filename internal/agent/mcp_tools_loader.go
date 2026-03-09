@@ -15,7 +15,7 @@ import (
 
 type toolCaller func(context.Context, ToolCall) (string, error)
 
-func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, error) {
+func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, func(), error) {
 	// Parse the config file
 	// TODO: support Env
 	var cfg struct {
@@ -27,10 +27,10 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 	}
 	raw, err := os.ReadFile(sysCfg.AI.MCPConfigFilePath)
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 	if err = json.Unmarshal(raw, &cfg); err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
 	// Create a go-sdk client per server and collect its tools
@@ -44,7 +44,7 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		case spec.Command != "":
 			tp = &mcp.CommandTransport{Command: exec.Command(spec.Command, spec.Args...)}
 		case spec.URL != "":
-			tp = &mcp.SSEClientTransport{Endpoint: spec.URL}
+			tp = &mcp.StreamableClientTransport{Endpoint: spec.URL}
 		default:
 			continue
 		}
@@ -115,9 +115,17 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 			tool2srv[tl.Name] = name
 		}
 	}
+	// closeSessions closes all open MCP client sessions.
+	closeSessions := func() {
+		for _, s := range sessionBySrv {
+			_ = s.Close()
+		}
+	}
+
 	// No tools. Fallback to LLM
 	if len(tools) == 0 {
-		return nil, nil, nil
+		closeSessions()
+		return nil, nil, nil, nil
 	}
 	// Dispatcher to route model's tool calls to the correct MCP server
 	dispatcher := func(ctx context.Context, call ToolCall) (string, error) {
@@ -150,5 +158,5 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		out, _ := json.Marshal(res.Content)
 		return string(out), nil
 	}
-	return tools, dispatcher, nil
+	return tools, dispatcher, closeSessions, nil
 }

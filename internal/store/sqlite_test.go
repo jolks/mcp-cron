@@ -44,6 +44,7 @@ func TestSaveAndGetLatestResult(t *testing.T) {
 	}
 	if got == nil {
 		t.Fatal("expected result, got nil")
+		return
 	}
 	if got.TaskID != "task-1" {
 		t.Errorf("TaskID = %q, want %q", got.TaskID, "task-1")

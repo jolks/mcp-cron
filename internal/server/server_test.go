@@ -39,7 +39,7 @@ func TestNewMCPServer(t *testing.T) {
 		Server: config.ServerConfig{
 			Address:       "localhost",
 			Port:          8080,
-			TransportMode: "sse",
+			TransportMode: "http",
 		},
 		Scheduler: *createTestSchedulerConfig(),
 	}
@@ -56,6 +56,7 @@ func TestNewMCPServer(t *testing.T) {
 
 	if server == nil {
 		t.Fatal("NewMCPServer returned nil server")
+		return
 	}
 
 	// Check values directly
@@ -74,7 +75,7 @@ func TestNewMCPServerWithCustomConfig(t *testing.T) {
 		Server: config.ServerConfig{
 			Address:       "127.0.0.1",
 			Port:          9090,
-			TransportMode: "sse",
+			TransportMode: "http",
 		},
 		Scheduler: *createTestSchedulerConfig(),
 	}
@@ -424,6 +425,7 @@ func TestTaskTypeHandling(t *testing.T) {
 	// Verify default type
 	if defaultTypeTask == nil {
 		t.Fatal("Default type task not found")
+		return
 	}
 	if defaultTypeTask.Type != model.TypeShellCommand {
 		t.Errorf("Expected default type to be %s, got %s", model.TypeShellCommand, defaultTypeTask.Type)
@@ -432,6 +434,7 @@ func TestTaskTypeHandling(t *testing.T) {
 	// Verify lowercase AI type
 	if aiLowerTypeTask == nil {
 		t.Fatal("AI lowercase type task not found")
+		return
 	}
 	if aiLowerTypeTask.Type != model.TypeAI {
 		t.Errorf("Expected lowercase AI type to be %s, got %s", model.TypeAI, aiLowerTypeTask.Type)
@@ -440,6 +443,7 @@ func TestTaskTypeHandling(t *testing.T) {
 	// Verify uppercase AI type
 	if aiUpperTypeTask == nil {
 		t.Fatal("AI uppercase type task not found")
+		return
 	}
 	if aiUpperTypeTask.Type != model.TypeAI {
 		t.Errorf("Expected uppercase AI type to be %s, got %s", model.TypeAI, aiUpperTypeTask.Type)

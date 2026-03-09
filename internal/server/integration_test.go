@@ -40,6 +40,7 @@ func createIntegrationTestServer(t *testing.T, opts ...integrationOpts) *MCPServ
 	}
 
 	cfg := config.DefaultConfig()
+	cfg.AI.MCPConfigFilePath = filepath.Join(t.TempDir(), "mcp.json") // no real MCP servers
 	if opt.pollInterval > 0 {
 		cfg.Scheduler.PollInterval = opt.pollInterval
 	}
@@ -113,6 +114,7 @@ func parseResponse(t *testing.T, result *mcp.CallToolResult, dest interface{}) {
 	t.Helper()
 	if result == nil {
 		t.Fatal("result is nil")
+		return
 	}
 	if len(result.Content) == 0 {
 		t.Fatal("result has no content")

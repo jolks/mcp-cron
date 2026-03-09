@@ -34,6 +34,7 @@ func TestToAnthropicTools(t *testing.T) {
 	tool := result[0].OfTool
 	if tool == nil {
 		t.Fatal("Expected OfTool to be set")
+		return
 	}
 	if tool.Name != "calculator" {
 		t.Errorf("Expected name 'calculator', got '%s'", tool.Name)
@@ -200,6 +201,7 @@ func TestToAnthropicMessages_AssistantEmptyArguments(t *testing.T) {
 	tu := result[0].Content[0].OfToolUse
 	if tu == nil {
 		t.Fatal("Expected tool_use block")
+		return
 	}
 	// Empty arguments should default to "{}"
 	inputBytes, ok := tu.Input.(json.RawMessage)

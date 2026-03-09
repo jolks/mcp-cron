@@ -47,6 +47,7 @@ func TestNewScheduler(t *testing.T) {
 	s := NewScheduler(cfg, testLogger())
 	if s == nil {
 		t.Fatal("NewScheduler() returned nil")
+		return
 	}
 	if s.tasks == nil {
 		t.Error("Scheduler.tasks is nil")

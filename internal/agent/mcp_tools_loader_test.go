@@ -3,8 +3,11 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"log"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
@@ -29,7 +32,7 @@ func TestBuildToolsFromConfig(t *testing.T) {
 	validConfig := `{
 		"mcpServers": {
 			"test-server": {
-				"url": "http://localhost:8080/sse"
+				"url": "http://localhost:8080"
 			},
 			"stdio-server": {
 				"command": "echo",
@@ -48,7 +51,7 @@ func TestBuildToolsFromConfig(t *testing.T) {
 	invalidConfig := `{
 		"mcpServers": {
 			"test-server": {
-				"url": "http://localhost:8080/sse",
+				"url": "http://localhost:8080",
 	}`
 	invalidConfigPath := filepath.Join(tempDir, "invalid-config.json")
 	if err := os.WriteFile(invalidConfigPath, []byte(invalidConfig), 0644); err != nil {
@@ -64,7 +67,10 @@ func TestBuildToolsFromConfig(t *testing.T) {
 		},
 	}
 
-	tools, dispatcher, err := buildToolsFromConfig(cfg)
+	tools, dispatcher, closeFn, err := buildToolsFromConfig(cfg)
+	if closeFn != nil {
+		defer closeFn()
+	}
 	// We expect no error but also no tools since the servers aren't available
 	if err != nil {
 		t.Errorf("buildToolsFromConfig with valid config should not return error: %v", err)
@@ -82,7 +88,7 @@ func TestBuildToolsFromConfig(t *testing.T) {
 			MCPConfigFilePath: invalidConfigPath,
 		},
 	}
-	_, _, err = buildToolsFromConfig(invalidCfg)
+	_, _, _, err = buildToolsFromConfig(invalidCfg)
 	if err == nil {
 		t.Error("Expected error for invalid config file, got nil")
 	}
@@ -93,7 +99,7 @@ func TestBuildToolsFromConfig(t *testing.T) {
 			MCPConfigFilePath: filepath.Join(tempDir, "non-existent.json"),
 		},
 	}
-	_, _, err = buildToolsFromConfig(nonExistentCfg)
+	_, _, _, err = buildToolsFromConfig(nonExistentCfg)
 	if err == nil {
 		t.Error("Expected error for non-existent file, got nil")
 	}
@@ -134,6 +140,82 @@ func TestSelfReferenceDetection(t *testing.T) {
 	// Verify the self-reference check would match
 	if res.ServerInfo.Name != config.ServerName {
 		t.Errorf("Server name %q should match config.ServerName %q", res.ServerInfo.Name, config.ServerName)
+	}
+}
+
+func TestStreamableHTTPTransport(t *testing.T) {
+	// Create a test MCP server with a tool
+	srv := mcp.NewServer(&mcp.Implementation{Name: "test-http-server", Version: "1.0.0"}, nil)
+	srv.AddTool(&mcp.Tool{
+		Name:        "greet",
+		Description: "Returns a greeting",
+		InputSchema: map[string]interface{}{
+			"type": "object",
+			"properties": map[string]interface{}{
+				"name": map[string]interface{}{
+					"type":        "string",
+					"description": "Name to greet",
+				},
+			},
+			"required": []string{"name"},
+		},
+	}, func(_ context.Context, req *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		var args struct {
+			Name string `json:"name"`
+		}
+		if err := json.Unmarshal(req.Params.Arguments, &args); err != nil {
+			return nil, err
+		}
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: "Hello, " + args.Name + "!"}},
+		}, nil
+	})
+
+	// Wrap with StreamableHTTPHandler and serve via httptest
+	handler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+		return srv
+	}, nil)
+	ts := httptest.NewServer(handler)
+	defer ts.Close()
+
+	// Connect using StreamableClientTransport (same path buildToolsFromConfig takes for URL specs)
+	tp := &mcp.StreamableClientTransport{Endpoint: ts.URL}
+	cli := mcp.NewClient(&mcp.Implementation{Name: "test-client", Version: "1.0.0"}, nil)
+	session, err := cli.Connect(context.Background(), tp, nil)
+	if err != nil {
+		t.Fatalf("Failed to connect: %v", err)
+	}
+	defer func() { _ = session.Close() }()
+
+	// Verify tool discovery
+	resp, err := session.ListTools(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListTools failed: %v", err)
+	}
+	if len(resp.Tools) != 1 {
+		t.Fatalf("Expected 1 tool, got %d", len(resp.Tools))
+	}
+	if resp.Tools[0].Name != "greet" {
+		t.Fatalf("Expected tool name 'greet', got %q", resp.Tools[0].Name)
+	}
+
+	// Call the tool and verify the result
+	result, err := session.CallTool(context.Background(), &mcp.CallToolParams{
+		Name:      "greet",
+		Arguments: map[string]any{"name": "World"},
+	})
+	if err != nil {
+		t.Fatalf("CallTool failed: %v", err)
+	}
+	if len(result.Content) == 0 {
+		t.Fatal("Expected non-empty content")
+	}
+	text, ok := result.Content[0].(*mcp.TextContent)
+	if !ok {
+		t.Fatalf("Expected TextContent, got %T", result.Content[0])
+	}
+	if text.Text != "Hello, World!" {
+		t.Errorf("Expected 'Hello, World!', got %q", text.Text)
 	}
 }
 
