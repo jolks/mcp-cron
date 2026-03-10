@@ -145,7 +145,7 @@ func DefaultConfig() *Config {
 			TransportMode: TransportHTTP,
 		},
 		Scheduler: SchedulerConfig{
-			DefaultTimeout: 10 * time.Minute,
+			DefaultTimeout: 0,
 			PollInterval:   1 * time.Second,
 		},
 		Logging: LoggingConfig{
@@ -180,8 +180,8 @@ func (c *Config) Validate() error {
 	}
 
 	// Validate scheduler config
-	if c.Scheduler.DefaultTimeout < time.Second {
-		return fmt.Errorf("default timeout must be at least 1 second")
+	if c.Scheduler.DefaultTimeout != 0 && c.Scheduler.DefaultTimeout < time.Second {
+		return fmt.Errorf("default timeout must be 0 (no timeout) or at least 1 second")
 	}
 
 	// Validate logging config

@@ -59,8 +59,14 @@ func (ae *AgentExecutor) ExecuteAgentTask(
 		TaskID:    taskID,
 	}
 
-	// Create a context with timeout
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	// Create a context, with an optional deadline when timeout > 0
+	var execCtx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		execCtx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 
 	// Create a task structure for RunTask

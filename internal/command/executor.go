@@ -49,8 +49,14 @@ func (ce *CommandExecutor) Execute(ctx context.Context, task *model.Task, timeou
 
 // ExecuteCommand executes a shell command with a timeout
 func (ce *CommandExecutor) ExecuteCommand(ctx context.Context, taskID, command string, timeout time.Duration) *model.Result {
-	// Create a cancellable context with timeout
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	// Create a cancellable context, with an optional deadline when timeout > 0
+	var execCtx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		execCtx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 
 	// Prepare the command

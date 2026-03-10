@@ -299,9 +299,14 @@ func waitForShutdown(cancel context.CancelFunc, app *Application, isPrimary bool
 	// Cancel the context to stop the poll loop from scheduling new tasks
 	cancel()
 
-	// Stop the application. The scheduler waits for in-flight tasks to finish
-	// (bounded by each task's own timeout), so the outer deadline must exceed it.
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), app.taskTimeout+1*time.Minute)
+	// Stop the application. The scheduler waits for in-flight tasks to finish,
+	// so the outer deadline must exceed any running task's timeout. When there
+	// is no default timeout (0), use a fixed 5-minute deadline.
+	shutdownTimeout := app.taskTimeout + 1*time.Minute
+	if app.taskTimeout == 0 {
+		shutdownTimeout = 5 * time.Minute
+	}
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	shutdownDone := make(chan struct{})

@@ -23,8 +23,8 @@ func TestDefaultConfig(t *testing.T) {
 	}
 
 	// Test Scheduler defaults
-	if cfg.Scheduler.DefaultTimeout != 10*time.Minute {
-		t.Errorf("Expected default timeout to be 10 minutes, got %s", cfg.Scheduler.DefaultTimeout)
+	if cfg.Scheduler.DefaultTimeout != 0 {
+		t.Errorf("Expected default timeout to be 0 (no timeout), got %s", cfg.Scheduler.DefaultTimeout)
 	}
 
 	// Test Logging defaults
@@ -98,11 +98,18 @@ func TestValidate(t *testing.T) {
 		t.Error("Expected error for invalid transport mode, got nil")
 	}
 
-	// Test invalid default timeout (too short)
+	// Test zero timeout is valid (means no timeout)
+	zeroTimeout := DefaultConfig()
+	zeroTimeout.Scheduler.DefaultTimeout = 0
+	if err := zeroTimeout.Validate(); err != nil {
+		t.Errorf("Expected zero timeout to be valid (no timeout), got error: %v", err)
+	}
+
+	// Test invalid default timeout (non-zero but too short)
 	invalidTimeout := DefaultConfig()
 	invalidTimeout.Scheduler.DefaultTimeout = time.Millisecond * 500
 	if err := invalidTimeout.Validate(); err == nil {
-		t.Error("Expected error for timeout < 1 second, got nil")
+		t.Error("Expected error for non-zero timeout < 1 second, got nil")
 	}
 
 	// Test invalid log level
@@ -259,8 +266,8 @@ func TestFromEnv(t *testing.T) {
 	_ = os.Setenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT", "invalid")
 	cfg = DefaultConfig()
 	FromEnv(cfg)
-	if cfg.Scheduler.DefaultTimeout != 10*time.Minute {
-		t.Errorf("Expected default timeout to remain 10m for invalid input, got %s", cfg.Scheduler.DefaultTimeout)
+	if cfg.Scheduler.DefaultTimeout != 0 {
+		t.Errorf("Expected default timeout to remain 0 for invalid input, got %s", cfg.Scheduler.DefaultTimeout)
 	}
 
 	// Test invalid max tool iterations format

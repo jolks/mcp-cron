@@ -232,6 +232,23 @@ func processAlive(pid int) bool {
 	return p.Signal(syscall.Signal(0)) == nil
 }
 
+// waitForFile polls until the file at path exists or the timeout expires.
+func waitForFile(t *testing.T, path string, timeout time.Duration) {
+	t.Helper()
+	deadline := time.After(timeout)
+	for {
+		if _, err := os.Stat(path); err == nil {
+			return
+		}
+		select {
+		case <-deadline:
+			t.Fatalf("file %s did not appear within %v", path, timeout)
+		default:
+			time.Sleep(50 * time.Millisecond)
+		}
+	}
+}
+
 // TestPrimaryKeepsAliveSecondaryExits verifies that the first instance
 // (primary) stays alive after transport exit while a second instance
 // (secondary) exits after its transport closes.
@@ -241,8 +258,9 @@ func TestPrimaryKeepsAliveSecondaryExits(t *testing.T) {
 	dbPath := filepath.Join(tmpDir, "test.db")
 
 	// Start primary instance.
+	primaryLog := filepath.Join(tmpDir, "primary.log")
 	cmd1 := exec.Command(bin, "--transport", "stdio", "--db-path", dbPath,
-		"--log-file", filepath.Join(tmpDir, "primary.log"))
+		"--log-file", primaryLog)
 	stdin1, _ := cmd1.StdinPipe()
 	if err := cmd1.Start(); err != nil {
 		t.Fatalf("start primary: %v", err)
@@ -251,19 +269,20 @@ func TestPrimaryKeepsAliveSecondaryExits(t *testing.T) {
 		_ = cmd1.Process.Kill()
 	}()
 
-	// Wait for it to start and acquire the lock.
-	time.Sleep(1 * time.Second)
+	// Wait for primary to create the DB (lock is acquired before DB creation).
+	waitForFile(t, dbPath, 10*time.Second)
 
 	// Start secondary instance (same db-path, can't acquire lock).
+	secondaryLog := filepath.Join(tmpDir, "secondary.log")
 	cmd2 := exec.Command(bin, "--transport", "stdio", "--db-path", dbPath,
-		"--log-file", filepath.Join(tmpDir, "secondary.log"))
+		"--log-file", secondaryLog)
 	stdin2, _ := cmd2.StdinPipe()
 	if err := cmd2.Start(); err != nil {
 		t.Fatalf("start secondary: %v", err)
 	}
 
-	// Wait for secondary to start.
-	time.Sleep(1 * time.Second)
+	// Wait for secondary to start (it writes its log file on startup).
+	waitForFile(t, secondaryLog, 10*time.Second)
 
 	// Both should be alive (secondary is serving its transport).
 	if !processAlive(cmd1.Process.Pid) {
@@ -313,6 +332,8 @@ func TestDifferentDbPathsBothPrimary(t *testing.T) {
 		if err := cmd.Start(); err != nil {
 			t.Fatalf("start %s: %v", name, err)
 		}
+		// Wait for instance to be ready (DB created means lock acquired and app started).
+		waitForFile(t, dbPath, 10*time.Second)
 		return cmd, func() {
 			// Send SIGINT while transport is still active — handled by
 			// the first select case in waitForShutdown (immediate shutdown).
@@ -327,9 +348,6 @@ func TestDifferentDbPathsBothPrimary(t *testing.T) {
 
 	cmd2, cleanup2 := start("b", filepath.Join(tmpDir, "b.db"))
 	defer cleanup2()
-
-	// Wait for both to start.
-	time.Sleep(1 * time.Second)
 
 	// Both should be alive simultaneously (different db-paths = separate locks).
 	if !processAlive(cmd1.Process.Pid) {
@@ -356,8 +374,9 @@ func TestRepeatedSpawnOnlyOnePrimaryAlive(t *testing.T) {
 	var instances []inst
 
 	for i := range 3 {
+		logFile := filepath.Join(tmpDir, "inst"+string(rune('0'+i))+".log")
 		cmd := exec.Command(bin, "--transport", "stdio", "--db-path", dbPath,
-			"--log-file", filepath.Join(tmpDir, "inst"+string(rune('0'+i))+".log"))
+			"--log-file", logFile)
 		stdin, _ := cmd.StdinPipe()
 		if err := cmd.Start(); err != nil {
 			t.Fatalf("spawn %d: %v", i, err)
@@ -367,14 +386,18 @@ func TestRepeatedSpawnOnlyOnePrimaryAlive(t *testing.T) {
 		go func() { done <- cmd.Wait() }()
 		instances = append(instances, inst{cmd: cmd, done: done})
 
-		// Give it time to start.
-		time.Sleep(1 * time.Second)
+		// Wait for instance to be ready.
+		if i == 0 {
+			waitForFile(t, dbPath, 10*time.Second)
+		} else {
+			waitForFile(t, logFile, 10*time.Second)
+		}
 
 		// Close stdin to simulate SDK disconnect.
 		_ = stdin.Close()
 
-		// Brief pause before next spawn.
-		time.Sleep(500 * time.Millisecond)
+		// Brief pause before next spawn to let shutdown begin.
+		time.Sleep(200 * time.Millisecond)
 	}
 
 	// Wait for secondary instances (1 and 2) to exit.
