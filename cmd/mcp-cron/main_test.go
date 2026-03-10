@@ -236,6 +236,8 @@ func processAlive(pid int) bool {
 func waitForFile(t *testing.T, path string, timeout time.Duration) {
 	t.Helper()
 	deadline := time.After(timeout)
+	ticker := time.NewTicker(50 * time.Millisecond)
+	defer ticker.Stop()
 	for {
 		if _, err := os.Stat(path); err == nil {
 			return
@@ -243,8 +245,7 @@ func waitForFile(t *testing.T, path string, timeout time.Duration) {
 		select {
 		case <-deadline:
 			t.Fatalf("file %s did not appear within %v", path, timeout)
-		default:
-			time.Sleep(50 * time.Millisecond)
+		case <-ticker.C:
 		}
 	}
 }
@@ -395,9 +396,6 @@ func TestRepeatedSpawnOnlyOnePrimaryAlive(t *testing.T) {
 
 		// Close stdin to simulate SDK disconnect.
 		_ = stdin.Close()
-
-		// Brief pause before next spawn to let shutdown begin.
-		time.Sleep(200 * time.Millisecond)
 	}
 
 	// Wait for secondary instances (1 and 2) to exit.

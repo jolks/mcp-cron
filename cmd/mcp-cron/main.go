@@ -300,12 +300,19 @@ func waitForShutdown(cancel context.CancelFunc, app *Application, isPrimary bool
 	cancel()
 
 	// Stop the application. The scheduler waits for in-flight tasks to finish,
-	// so the outer deadline must exceed any running task's timeout. When there
-	// is no default timeout (0), use a fixed 5-minute deadline.
-	shutdownTimeout := app.taskTimeout + 1*time.Minute
+	// so the outer deadline must exceed any running task's timeout.
 	if app.taskTimeout == 0 {
-		shutdownTimeout = 5 * time.Minute
+		// No default timeout configured — wait indefinitely for in-flight tasks.
+		// The user already sent SIGINT; they can send SIGKILL if impatient.
+		app.logger.Infof("Waiting for in-flight tasks to complete (no timeout configured)...")
+		if err := app.Stop(); err != nil {
+			app.logger.Errorf("Error during shutdown: %v", err)
+		}
+		app.logger.Infof("Graceful shutdown completed")
+		return
 	}
+
+	shutdownTimeout := app.taskTimeout + 1*time.Minute
 	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 

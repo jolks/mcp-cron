@@ -46,7 +46,8 @@ func (ae *AgentExecutor) Execute(ctx context.Context, task *model.Task, timeout 
 	return nil
 }
 
-// ExecuteAgentTask executes a command using an AI agent
+// ExecuteAgentTask executes a command using an AI agent.
+// A timeout of 0 means no deadline — the task runs until it completes or the context is cancelled.
 func (ae *AgentExecutor) ExecuteAgentTask(
 	ctx context.Context,
 	taskID string,
