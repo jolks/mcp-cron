@@ -23,7 +23,10 @@ const (
 // ChatCompletionsOnlyGateways lists hostnames of API proxies that support only
 // the Chat Completions API (not the Responses API). When the configured base
 // URL matches one of these, the agent falls back to the Chat Completions provider.
-var ChatCompletionsOnlyGateways = []string{"api.kilo.ai"}
+var ChatCompletionsOnlyGateways = []string{
+	"api.kilo.ai",
+	"generativelanguage.googleapis.com",
+}
 
 // IsChatCompletionsGateway returns true if baseURL points to a known proxy
 // that only supports Chat Completions.
