@@ -137,6 +137,7 @@ func TestIsChatCompletionsGateway(t *testing.T) {
 		{"direct openai", "https://api.openai.com/v1", false},
 		{"kilo gateway", "https://api.kilo.ai/api/gateway", true},
 		{"kilo with path", "https://api.kilo.ai/v1", true},
+		{"gemini", "https://generativelanguage.googleapis.com/v1beta/openai", true},
 		{"ollama", "http://localhost:11434/v1", false},
 		{"groq", "https://api.groq.com/openai/v1", false},
 	}
