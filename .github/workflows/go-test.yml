@@ -22,10 +22,7 @@ jobs:
       run: go mod vendor
 
     - name: Lint
-      uses: golangci/golangci-lint-action@v6
-      with:
-        version: latest
-        args: --out-format=colored-line-number --modules-download-mode=vendor
+      run: go tool golangci-lint run --out-format=colored-line-number --modules-download-mode=vendor
 
     - name: Run tests with coverage
       run: go test ./... -cover -coverprofile=coverage.out
