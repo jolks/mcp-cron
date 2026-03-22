@@ -311,10 +311,6 @@ func (s *SQLiteStore) QueryDB(ctx context.Context, query string) ([]map[string]i
 	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
 		return nil, errors.InvalidInput("only SELECT queries are allowed")
 	}
-	if strings.Contains(query, ";") {
-		return nil, errors.InvalidInput("multiple statements are not allowed")
-	}
-
 	// Use a dedicated connection so PRAGMA query_only is scoped to this query.
 	conn, err := s.db.Conn(ctx)
 	if err != nil {
@@ -386,7 +382,7 @@ func (s *SQLiteStore) QueryDB(ctx context.Context, query string) ([]map[string]i
 // GetSchema returns a description of the database schema by querying sqlite_master.
 func (s *SQLiteStore) GetSchema() (string, error) {
 	rows, err := s.db.Query(`
-		SELECT name, sql FROM sqlite_master
+		SELECT sql FROM sqlite_master
 		WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
 		ORDER BY name`)
 	if err != nil {
@@ -396,8 +392,8 @@ func (s *SQLiteStore) GetSchema() (string, error) {
 
 	var parts []string
 	for rows.Next() {
-		var name, ddl string
-		if err := rows.Scan(&name, &ddl); err != nil {
+		var ddl string
+		if err := rows.Scan(&ddl); err != nil {
 			return "", fmt.Errorf("scan schema row: %w", err)
 		}
 		parts = append(parts, ddl)

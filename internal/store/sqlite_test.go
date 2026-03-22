@@ -770,12 +770,13 @@ func TestQueryDBRejectsNonSelect(t *testing.T) {
 	}
 }
 
-func TestQueryDBRejectsSemicolons(t *testing.T) {
+func TestQueryDBMultiStatement(t *testing.T) {
 	s := newTestStore(t)
 
+	// Multi-statement queries are rejected by the SQLite driver (not executed).
 	_, err := s.QueryDB(context.Background(), "SELECT 1; DROP TABLE results")
 	if err == nil {
-		t.Fatal("expected error for semicolons, got nil")
+		t.Fatal("expected error for multi-statement query, got nil")
 	}
 }
 

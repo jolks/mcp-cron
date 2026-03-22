@@ -56,7 +56,7 @@ scripts/
 
 ## MCP Tools Exposed
 
-list_tasks, get_task, get_task_result, add_task, add_ai_task, update_task, remove_task, run_task, enable_task, disable_task
+list_tasks, get_task, get_task_result, query_task_result, add_task, add_ai_task, update_task, remove_task, run_task, enable_task, disable_task
 
 ## Dependencies
 

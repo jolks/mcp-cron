@@ -4,6 +4,7 @@ package server
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -970,5 +971,40 @@ func TestIntegration_QueryTaskResultRejectsNonSelect(t *testing.T) {
 	_, err := srv.handleQueryTaskResult(context.Background(), req)
 	if err == nil {
 		t.Fatal("expected error for DELETE, got nil")
+	}
+}
+
+// TestIntegration_QueryTaskResultTruncation verifies the truncation warning when results exceed MaxQueryRows.
+func TestIntegration_QueryTaskResultTruncation(t *testing.T) {
+	srv := createIntegrationTestServer(t, integrationOpts{withStore: true})
+
+	now := time.Now()
+	total := model.MaxQueryRows + 1
+	for i := 0; i < total; i++ {
+		if err := srv.resultStore.SaveResult(&model.Result{
+			TaskID:    "trunc-task",
+			Command:   "echo",
+			Output:    fmt.Sprintf("row-%d", i),
+			StartTime: now.Add(time.Duration(i) * time.Millisecond),
+			EndTime:   now.Add(time.Duration(i)*time.Millisecond + time.Second),
+			Duration:  "1s",
+		}); err != nil {
+			t.Fatalf("SaveResult %d: %v", i, err)
+		}
+	}
+
+	req := makeRequest(t, QueryTaskResultParams{SQL: "SELECT * FROM results"})
+	result, err := srv.handleQueryTaskResult(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleQueryTaskResult: %v", err)
+	}
+
+	if len(result.Content) != 2 {
+		t.Fatalf("expected 2 content elements (data + warning), got %d", len(result.Content))
+	}
+
+	warning := result.Content[1].(*mcp.TextContent).Text
+	if !strings.Contains(warning, "truncated") {
+		t.Errorf("expected truncation warning, got %q", warning)
 	}
 }
