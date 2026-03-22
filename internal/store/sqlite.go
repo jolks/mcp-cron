@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/jolks/mcp-cron/internal/model"
@@ -297,6 +298,88 @@ func (s *SQLiteStore) AdvanceNextRun(taskID string, currentNextRun time.Time, ne
 		return false, fmt.Errorf("check advance result: %w", err)
 	}
 	return rows == 1, nil
+}
+
+// QueryDB executes a read-only SQL query and returns results as generic maps.
+// Only SELECT and WITH (CTE) statements are allowed.
+func (s *SQLiteStore) QueryDB(query string) ([]map[string]interface{}, error) {
+	upper := strings.TrimSpace(strings.ToUpper(query))
+	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
+		return nil, fmt.Errorf("only SELECT queries are allowed")
+	}
+	if strings.Contains(query, ";") {
+		return nil, fmt.Errorf("multiple statements are not allowed")
+	}
+
+	rows, err := s.db.Query(query)
+	if err != nil {
+		return nil, fmt.Errorf("query error: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("get columns: %w", err)
+	}
+
+	var results []map[string]interface{}
+	for rows.Next() {
+		values := make([]interface{}, len(columns))
+		valuePtrs := make([]interface{}, len(columns))
+		for i := range values {
+			valuePtrs[i] = &values[i]
+		}
+
+		if err := rows.Scan(valuePtrs...); err != nil {
+			return nil, fmt.Errorf("scan row: %w", err)
+		}
+
+		row := make(map[string]interface{}, len(columns))
+		for i, col := range columns {
+			val := values[i]
+			// Convert []byte to string for readability
+			if b, ok := val.([]byte); ok {
+				row[col] = string(b)
+			} else {
+				row[col] = val
+			}
+		}
+		results = append(results, row)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate rows: %w", err)
+	}
+
+	if results == nil {
+		results = []map[string]interface{}{}
+	}
+	return results, nil
+}
+
+// GetSchema returns a description of the database schema by querying sqlite_master.
+func (s *SQLiteStore) GetSchema() (string, error) {
+	rows, err := s.db.Query(`
+		SELECT name, sql FROM sqlite_master
+		WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND sql IS NOT NULL
+		ORDER BY name`)
+	if err != nil {
+		return "", fmt.Errorf("query schema: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	var parts []string
+	for rows.Next() {
+		var name, ddl string
+		if err := rows.Scan(&name, &ddl); err != nil {
+			return "", fmt.Errorf("scan schema row: %w", err)
+		}
+		parts = append(parts, ddl)
+	}
+	if err := rows.Err(); err != nil {
+		return "", fmt.Errorf("iterate schema rows: %w", err)
+	}
+
+	return "Schema: " + strings.Join(parts, "; "), nil
 }
 
 func boolToInt(b bool) int {

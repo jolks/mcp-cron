@@ -927,3 +927,48 @@ func TestIntegration_AITaskGetTaskResult(t *testing.T) {
 		t.Errorf("expected second execution output to contain '2', got %q", second.Output)
 	}
 }
+
+// TestIntegration_QueryTaskResult tests the query_task_result handler with SQL queries.
+func TestIntegration_QueryTaskResult(t *testing.T) {
+	srv := createIntegrationTestServer(t, integrationOpts{withStore: true})
+
+	// Add a task and execute it
+	task := mustAddShellTask(t, srv, TaskParams{
+		Name:    "query-test",
+		Command: "echo query-output",
+		Enabled: true,
+	})
+	mustExecute(t, srv, task.ID, 10*time.Second)
+
+	// Test basic SELECT
+	req := makeRequest(t, QueryTaskResultParams{
+		SQL: "SELECT t.name, r.output, r.exit_code FROM results r JOIN tasks t ON r.task_id = t.id",
+	})
+	result, err := srv.handleQueryTaskResult(context.Background(), req)
+	if err != nil {
+		t.Fatalf("handleQueryTaskResult: %v", err)
+	}
+
+	text := result.Content[0].(*mcp.TextContent).Text
+	var rows []map[string]interface{}
+	if err := json.Unmarshal([]byte(text), &rows); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0]["name"] != "query-test" {
+		t.Errorf("name = %v, want query-test", rows[0]["name"])
+	}
+}
+
+// TestIntegration_QueryTaskResultRejectsNonSelect verifies non-SELECT queries are rejected.
+func TestIntegration_QueryTaskResultRejectsNonSelect(t *testing.T) {
+	srv := createIntegrationTestServer(t, integrationOpts{withStore: true})
+
+	req := makeRequest(t, QueryTaskResultParams{SQL: "DELETE FROM results"})
+	_, err := srv.handleQueryTaskResult(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error for DELETE, got nil")
+	}
+}

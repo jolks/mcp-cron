@@ -50,6 +50,11 @@ type TaskResultParams struct {
 	Limit int    `json:"limit,omitempty" description:"number of recent results to return (default 1, max 100)"`
 }
 
+// QueryTaskResultParams holds parameters for the query_task_result tool
+type QueryTaskResultParams struct {
+	SQL string `json:"sql" description:"SQL SELECT query to execute against the database"`
+}
+
 // AITaskParams combines task parameters with AI-specific parameters
 type AITaskParams struct {
 	TaskParams
@@ -546,6 +551,38 @@ func (s *MCPServer) handleGetTaskResult(_ context.Context, request *mcp.CallTool
 		return nil, errors.NotFound("result", params.ID)
 	}
 	return createResultsResponse(results)
+}
+
+// handleQueryTaskResult executes a read-only SQL query against the database
+func (s *MCPServer) handleQueryTaskResult(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+	var params QueryTaskResultParams
+	if err := extractParams(request, &params); err != nil {
+		return nil, err
+	}
+
+	if params.SQL == "" {
+		return nil, errors.InvalidInput("sql is required")
+	}
+
+	s.logger.Debugf("Handling query_task_result request: %s", params.SQL)
+
+	rows, err := s.resultStore.QueryDB(params.SQL)
+	if err != nil {
+		return nil, errors.InvalidInput(err.Error())
+	}
+
+	responseJSON, err := json.Marshal(rows)
+	if err != nil {
+		return nil, errors.Internal(fmt.Errorf("failed to marshal query results: %w", err))
+	}
+
+	return &mcp.CallToolResult{
+		Content: []mcp.Content{
+			&mcp.TextContent{
+				Text: string(responseJSON),
+			},
+		},
+	}, nil
 }
 
 // Execute implements the taskexec.Executor interface by routing tasks to the appropriate executor

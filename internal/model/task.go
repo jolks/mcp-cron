@@ -82,5 +82,7 @@ type ResultStore interface {
 	SaveResult(result *Result) error
 	GetLatestResult(taskID string) (*Result, error)
 	GetResults(taskID string, limit int) ([]*Result, error)
+	QueryDB(sql string) ([]map[string]interface{}, error)
+	GetSchema() (string, error)
 	Close() error
 }

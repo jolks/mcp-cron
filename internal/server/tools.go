@@ -90,6 +90,21 @@ func (s *MCPServer) registerToolsDeclarative() {
 		},
 	}
 
+	// Build query_task_result description with dynamic schema
+	queryDesc := "Run a read-only SQL query against the database. Only SELECT statements are allowed. The output column can be large — use SUBSTR(output,1,500) or LIMIT to manage response size."
+	if s.resultStore != nil {
+		if schema, err := s.resultStore.GetSchema(); err == nil && schema != "" {
+			queryDesc += " " + schema
+		}
+	}
+
+	tools = append(tools, ToolDefinition{
+		Name:        "query_task_result",
+		Description: queryDesc,
+		Handler:     s.handleQueryTaskResult,
+		Parameters:  QueryTaskResultParams{},
+	})
+
 	// Register all the tools
 	for _, tool := range tools {
 		registerToolWithError(s.server, tool)

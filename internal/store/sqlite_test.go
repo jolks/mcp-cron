@@ -3,6 +3,7 @@ package store
 
 import (
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -664,6 +665,157 @@ func TestAdvanceNextRun(t *testing.T) {
 	}
 	if !tasks[0].NextRun.Truncate(time.Microsecond).Equal(newNextRun) {
 		t.Errorf("NextRun = %v, want %v", tasks[0].NextRun, newNextRun)
+	}
+}
+
+// --- QueryDB tests ---
+
+func TestQueryDBBasicSelect(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	if err := s.SaveTask(&model.Task{
+		ID: "task-q1", Name: "Backup", Type: "shell_command",
+		Command: "echo backup", Schedule: "0 0 * * *", Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+	if err := s.SaveResult(&model.Result{
+		TaskID: "task-q1", Command: "echo backup", Output: "OK", ExitCode: 0,
+		StartTime: now, EndTime: now.Add(time.Second), Duration: "1s",
+	}); err != nil {
+		t.Fatalf("SaveResult: %v", err)
+	}
+
+	rows, err := s.QueryDB("SELECT task_id, output, exit_code FROM results WHERE task_id = 'task-q1'")
+	if err != nil {
+		t.Fatalf("QueryDB: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0]["output"] != "OK" {
+		t.Errorf("output = %v, want OK", rows[0]["output"])
+	}
+}
+
+func TestQueryDBJoin(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	if err := s.SaveTask(&model.Task{
+		ID: "task-j1", Name: "Daily backup", Type: "shell_command",
+		Command: "echo ok", Schedule: "0 0 * * *", Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+	if err := s.SaveResult(&model.Result{
+		TaskID: "task-j1", Output: "done", ExitCode: 0,
+		StartTime: now, EndTime: now.Add(time.Second), Duration: "1s",
+	}); err != nil {
+		t.Fatalf("SaveResult: %v", err)
+	}
+
+	rows, err := s.QueryDB("SELECT t.name, r.output FROM results r JOIN tasks t ON r.task_id = t.id")
+	if err != nil {
+		t.Fatalf("QueryDB: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0]["name"] != "Daily backup" {
+		t.Errorf("name = %v, want Daily backup", rows[0]["name"])
+	}
+}
+
+func TestQueryDBWithCTE(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	if err := s.SaveTask(&model.Task{
+		ID: "task-c1", Name: "CTE Test", Type: "shell_command",
+		Command: "echo", Schedule: "* * * * *", Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	rows, err := s.QueryDB("WITH t AS (SELECT * FROM tasks) SELECT name FROM t")
+	if err != nil {
+		t.Fatalf("QueryDB: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	if rows[0]["name"] != "CTE Test" {
+		t.Errorf("name = %v, want CTE Test", rows[0]["name"])
+	}
+}
+
+func TestQueryDBRejectsNonSelect(t *testing.T) {
+	s := newTestStore(t)
+
+	_, err := s.QueryDB("DELETE FROM results")
+	if err == nil {
+		t.Fatal("expected error for DELETE, got nil")
+	}
+
+	_, err = s.QueryDB("ATTACH DATABASE ':memory:' AS x")
+	if err == nil {
+		t.Fatal("expected error for ATTACH, got nil")
+	}
+}
+
+func TestQueryDBRejectsSemicolons(t *testing.T) {
+	s := newTestStore(t)
+
+	_, err := s.QueryDB("SELECT 1; DROP TABLE results")
+	if err == nil {
+		t.Fatal("expected error for semicolons, got nil")
+	}
+}
+
+func TestQueryDBInvalidSQL(t *testing.T) {
+	s := newTestStore(t)
+
+	_, err := s.QueryDB("SELECT FROM")
+	if err == nil {
+		t.Fatal("expected error for invalid SQL, got nil")
+	}
+}
+
+func TestQueryDBEmptyResult(t *testing.T) {
+	s := newTestStore(t)
+
+	rows, err := s.QueryDB("SELECT * FROM results WHERE task_id = 'nonexistent'")
+	if err != nil {
+		t.Fatalf("QueryDB: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Fatalf("expected 0 rows, got %d", len(rows))
+	}
+}
+
+// --- GetSchema tests ---
+
+func TestGetSchema(t *testing.T) {
+	s := newTestStore(t)
+
+	schema, err := s.GetSchema()
+	if err != nil {
+		t.Fatalf("GetSchema: %v", err)
+	}
+	if schema == "" {
+		t.Fatal("expected non-empty schema")
+	}
+	// Should contain both tables
+	if !strings.Contains(schema, "results") {
+		t.Error("schema should mention results table")
+	}
+	if !strings.Contains(schema, "tasks") {
+		t.Error("schema should mention tasks table")
 	}
 }
 
