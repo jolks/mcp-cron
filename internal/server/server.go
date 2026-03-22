@@ -554,7 +554,7 @@ func (s *MCPServer) handleGetTaskResult(_ context.Context, request *mcp.CallTool
 }
 
 // handleQueryTaskResult executes a read-only SQL query against the database
-func (s *MCPServer) handleQueryTaskResult(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+func (s *MCPServer) handleQueryTaskResult(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	var params QueryTaskResultParams
 	if err := extractParams(request, &params); err != nil {
 		return nil, err
@@ -566,9 +566,12 @@ func (s *MCPServer) handleQueryTaskResult(_ context.Context, request *mcp.CallTo
 
 	s.logger.Debugf("Handling query_task_result request: %s", params.SQL)
 
-	rows, err := s.resultStore.QueryDB(params.SQL)
+	rows, err := s.resultStore.QueryDB(ctx, params.SQL)
 	if err != nil {
-		return nil, errors.InvalidInput(err.Error())
+		if strings.HasPrefix(err.Error(), "invalid input:") {
+			return nil, err
+		}
+		return nil, errors.Internal(err)
 	}
 
 	responseJSON, err := json.Marshal(rows)
@@ -576,13 +579,19 @@ func (s *MCPServer) handleQueryTaskResult(_ context.Context, request *mcp.CallTo
 		return nil, errors.Internal(fmt.Errorf("failed to marshal query results: %w", err))
 	}
 
-	return &mcp.CallToolResult{
+	result := &mcp.CallToolResult{
 		Content: []mcp.Content{
 			&mcp.TextContent{
 				Text: string(responseJSON),
 			},
 		},
-	}, nil
+	}
+	if len(rows) >= model.MaxQueryRows {
+		result.Content = append(result.Content, &mcp.TextContent{
+			Text: fmt.Sprintf("Warning: Results truncated to %d rows. Use LIMIT or WHERE clauses to narrow your query.", model.MaxQueryRows),
+		})
+	}
+	return result, nil
 }
 
 // Execute implements the taskexec.Executor interface by routing tasks to the appropriate executor

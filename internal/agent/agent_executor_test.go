@@ -298,7 +298,7 @@ func (m *mockResultStore) GetResults(taskID string, limit int) ([]*model.Result,
 	return rs, nil
 }
 
-func (m *mockResultStore) QueryDB(_ string) ([]map[string]interface{}, error) {
+func (m *mockResultStore) QueryDB(_ context.Context, _ string) ([]map[string]interface{}, error) {
 	return nil, nil
 }
 

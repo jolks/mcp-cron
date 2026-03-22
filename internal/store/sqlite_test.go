@@ -2,6 +2,8 @@
 package store
 
 import (
+	"context"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -688,7 +690,7 @@ func TestQueryDBBasicSelect(t *testing.T) {
 		t.Fatalf("SaveResult: %v", err)
 	}
 
-	rows, err := s.QueryDB("SELECT task_id, output, exit_code FROM results WHERE task_id = 'task-q1'")
+	rows, err := s.QueryDB(context.Background(), "SELECT task_id, output, exit_code FROM results WHERE task_id = 'task-q1'")
 	if err != nil {
 		t.Fatalf("QueryDB: %v", err)
 	}
@@ -718,7 +720,7 @@ func TestQueryDBJoin(t *testing.T) {
 		t.Fatalf("SaveResult: %v", err)
 	}
 
-	rows, err := s.QueryDB("SELECT t.name, r.output FROM results r JOIN tasks t ON r.task_id = t.id")
+	rows, err := s.QueryDB(context.Background(), "SELECT t.name, r.output FROM results r JOIN tasks t ON r.task_id = t.id")
 	if err != nil {
 		t.Fatalf("QueryDB: %v", err)
 	}
@@ -742,7 +744,7 @@ func TestQueryDBWithCTE(t *testing.T) {
 		t.Fatalf("SaveTask: %v", err)
 	}
 
-	rows, err := s.QueryDB("WITH t AS (SELECT * FROM tasks) SELECT name FROM t")
+	rows, err := s.QueryDB(context.Background(), "WITH t AS (SELECT * FROM tasks) SELECT name FROM t")
 	if err != nil {
 		t.Fatalf("QueryDB: %v", err)
 	}
@@ -757,12 +759,12 @@ func TestQueryDBWithCTE(t *testing.T) {
 func TestQueryDBRejectsNonSelect(t *testing.T) {
 	s := newTestStore(t)
 
-	_, err := s.QueryDB("DELETE FROM results")
+	_, err := s.QueryDB(context.Background(), "DELETE FROM results")
 	if err == nil {
 		t.Fatal("expected error for DELETE, got nil")
 	}
 
-	_, err = s.QueryDB("ATTACH DATABASE ':memory:' AS x")
+	_, err = s.QueryDB(context.Background(), "ATTACH DATABASE ':memory:' AS x")
 	if err == nil {
 		t.Fatal("expected error for ATTACH, got nil")
 	}
@@ -771,7 +773,7 @@ func TestQueryDBRejectsNonSelect(t *testing.T) {
 func TestQueryDBRejectsSemicolons(t *testing.T) {
 	s := newTestStore(t)
 
-	_, err := s.QueryDB("SELECT 1; DROP TABLE results")
+	_, err := s.QueryDB(context.Background(), "SELECT 1; DROP TABLE results")
 	if err == nil {
 		t.Fatal("expected error for semicolons, got nil")
 	}
@@ -780,7 +782,7 @@ func TestQueryDBRejectsSemicolons(t *testing.T) {
 func TestQueryDBInvalidSQL(t *testing.T) {
 	s := newTestStore(t)
 
-	_, err := s.QueryDB("SELECT FROM")
+	_, err := s.QueryDB(context.Background(), "SELECT FROM")
 	if err == nil {
 		t.Fatal("expected error for invalid SQL, got nil")
 	}
@@ -789,12 +791,86 @@ func TestQueryDBInvalidSQL(t *testing.T) {
 func TestQueryDBEmptyResult(t *testing.T) {
 	s := newTestStore(t)
 
-	rows, err := s.QueryDB("SELECT * FROM results WHERE task_id = 'nonexistent'")
+	rows, err := s.QueryDB(context.Background(), "SELECT * FROM results WHERE task_id = 'nonexistent'")
 	if err != nil {
 		t.Fatalf("QueryDB: %v", err)
 	}
 	if len(rows) != 0 {
 		t.Fatalf("expected 0 rows, got %d", len(rows))
+	}
+}
+
+func TestQueryDBRejectsCTEWithDML(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	if err := s.SaveTask(&model.Task{
+		ID: "task-cte-dml", Name: "CTE DML", Type: "shell_command",
+		Command: "echo", Schedule: "* * * * *", Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+	if err := s.SaveResult(&model.Result{
+		TaskID: "task-cte-dml", Command: "echo", Output: "keep",
+		StartTime: now, EndTime: now.Add(time.Second), Duration: "1s",
+	}); err != nil {
+		t.Fatalf("SaveResult: %v", err)
+	}
+
+	// CTE hiding a DELETE should be rejected by PRAGMA query_only
+	_, err := s.QueryDB(context.Background(), "WITH t AS (DELETE FROM results RETURNING *) SELECT * FROM t")
+	if err == nil {
+		t.Fatal("expected error for CTE with DELETE, got nil")
+	}
+
+	// Verify the row was NOT deleted
+	rows, err := s.QueryDB(context.Background(), "SELECT COUNT(*) as cnt FROM results")
+	if err != nil {
+		t.Fatalf("count query: %v", err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 row, got %d", len(rows))
+	}
+	cnt, ok := rows[0]["cnt"].(int64)
+	if !ok {
+		t.Fatalf("cnt type = %T, want int64", rows[0]["cnt"])
+	}
+	if cnt != 1 {
+		t.Errorf("expected 1 result after blocked DELETE, got %d", cnt)
+	}
+}
+
+func TestQueryDBRowLimit(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().Truncate(time.Microsecond)
+	if err := s.SaveTask(&model.Task{
+		ID: "task-limit", Name: "Limit Test", Type: "shell_command",
+		Command: "echo", Schedule: "* * * * *", Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	total := model.MaxQueryRows + 10
+	for i := 0; i < total; i++ {
+		if err := s.SaveResult(&model.Result{
+			TaskID: "task-limit", Command: "echo", Output: fmt.Sprintf("row-%d", i),
+			StartTime: now.Add(time.Duration(i) * time.Millisecond),
+			EndTime:   now.Add(time.Duration(i)*time.Millisecond + time.Second),
+			Duration:  "1s",
+		}); err != nil {
+			t.Fatalf("SaveResult %d: %v", i, err)
+		}
+	}
+
+	rows, err := s.QueryDB(context.Background(), "SELECT * FROM results")
+	if err != nil {
+		t.Fatalf("QueryDB: %v", err)
+	}
+	if len(rows) != model.MaxQueryRows {
+		t.Errorf("expected %d rows (capped), got %d", model.MaxQueryRows, len(rows))
 	}
 }
 

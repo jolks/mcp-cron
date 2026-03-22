@@ -77,12 +77,15 @@ type TaskStore interface {
 	AdvanceNextRun(taskID string, currentNextRun time.Time, newNextRun time.Time) (bool, error)
 }
 
+// MaxQueryRows is the maximum number of rows returned by QueryDB.
+const MaxQueryRows = 1000
+
 // ResultStore defines an interface for persisting and retrieving task execution results
 type ResultStore interface {
 	SaveResult(result *Result) error
 	GetLatestResult(taskID string) (*Result, error)
 	GetResults(taskID string, limit int) ([]*Result, error)
-	QueryDB(sql string) ([]map[string]interface{}, error)
+	QueryDB(ctx context.Context, query string) ([]map[string]interface{}, error)
 	GetSchema() (string, error)
 	Close() error
 }

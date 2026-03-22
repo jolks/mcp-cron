@@ -2,6 +2,7 @@
 package store
 
 import (
+	"context"
 	"database/sql"
 	"fmt"
 	"os"
@@ -9,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/jolks/mcp-cron/internal/errors"
 	"github.com/jolks/mcp-cron/internal/model"
 
 	_ "modernc.org/sqlite"
@@ -301,18 +303,39 @@ func (s *SQLiteStore) AdvanceNextRun(taskID string, currentNextRun time.Time, ne
 }
 
 // QueryDB executes a read-only SQL query and returns results as generic maps.
-// Only SELECT and WITH (CTE) statements are allowed.
-func (s *SQLiteStore) QueryDB(query string) ([]map[string]interface{}, error) {
+// Only SELECT and WITH (CTE) statements are allowed. Read-only access is
+// enforced at the SQLite level via PRAGMA query_only. Results are capped
+// at model.MaxQueryRows rows.
+func (s *SQLiteStore) QueryDB(ctx context.Context, query string) ([]map[string]interface{}, error) {
 	upper := strings.TrimSpace(strings.ToUpper(query))
 	if !strings.HasPrefix(upper, "SELECT") && !strings.HasPrefix(upper, "WITH") {
-		return nil, fmt.Errorf("only SELECT queries are allowed")
+		return nil, errors.InvalidInput("only SELECT queries are allowed")
 	}
 	if strings.Contains(query, ";") {
-		return nil, fmt.Errorf("multiple statements are not allowed")
+		return nil, errors.InvalidInput("multiple statements are not allowed")
 	}
 
-	rows, err := s.db.Query(query)
+	// Use a dedicated connection so PRAGMA query_only is scoped to this query.
+	conn, err := s.db.Conn(ctx)
 	if err != nil {
+		return nil, fmt.Errorf("acquire connection: %w", err)
+	}
+	defer func() { _ = conn.Close() }()
+
+	if _, err := conn.ExecContext(ctx, "PRAGMA query_only=ON"); err != nil {
+		return nil, fmt.Errorf("set query_only: %w", err)
+	}
+	defer func() {
+		// Reset before returning connection to pool; use Background in case ctx is cancelled.
+		_, _ = conn.ExecContext(context.Background(), "PRAGMA query_only=OFF")
+	}()
+
+	rows, err := conn.QueryContext(ctx, query)
+	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "read-only") || strings.Contains(errMsg, "readonly") {
+			return nil, errors.InvalidInput("query rejected: write operations are not allowed")
+		}
 		return nil, fmt.Errorf("query error: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
@@ -324,6 +347,10 @@ func (s *SQLiteStore) QueryDB(query string) ([]map[string]interface{}, error) {
 
 	var results []map[string]interface{}
 	for rows.Next() {
+		if len(results) >= model.MaxQueryRows {
+			break
+		}
+
 		values := make([]interface{}, len(columns))
 		valuePtrs := make([]interface{}, len(columns))
 		for i := range values {
