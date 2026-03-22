@@ -4,13 +4,14 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jolks/mcp-cron/internal/config"
@@ -220,81 +221,92 @@ func TestStreamableHTTPTransport(t *testing.T) {
 	}
 }
 
-func TestEnvPassedToCommand(t *testing.T) {
-	tempDir, err := os.MkdirTemp("", "mcp-env-test")
-	if err != nil {
-		t.Fatalf("Failed to create temp directory: %v", err)
+// TestHelperProcess is a subprocess helper for TestEnvPassedToCommand.
+// When GO_WANT_HELPER_PROCESS=1, it serves a minimal MCP server on stdio
+// with a check_env tool that returns the value of MCP_TEST_ENV_VALUE.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+		return
 	}
-	defer func() { _ = os.RemoveAll(tempDir) }()
+	srv := mcp.NewServer(&mcp.Implementation{Name: "env-test-server", Version: "1.0.0"}, nil)
+	srv.AddTool(&mcp.Tool{
+		Name:        "check_env",
+		Description: "Returns MCP_TEST_ENV_VALUE",
+		InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+	}, func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: os.Getenv("MCP_TEST_ENV_VALUE")}},
+		}, nil
+	})
+	_ = srv.Run(context.Background(), &mcp.StdioTransport{})
+	os.Exit(0)
+}
+
+func TestEnvPassedToCommand(t *testing.T) {
+	tempDir := t.TempDir()
 
 	log.SetOutput(io.Discard)
 	defer log.SetOutput(os.Stderr)
 
-	// Config with env vars — the server won't connect (not a real MCP server),
-	// but we verify the env parsing works by checking the JSON round-trip
-	envConfig := `{
+	// Config that spawns this test binary as an MCP server subprocess,
+	// passing env vars through the config's env field.
+	envConfig := fmt.Sprintf(`{
 		"mcpServers": {
-			"env-server": {
-				"command": "echo",
-				"args": ["hello"],
+			"env-test": {
+				"command": %q,
+				"args": ["-test.run=^TestHelperProcess$", "--"],
 				"env": {
-					"MY_CUSTOM_VAR": "custom_value",
-					"ANOTHER_VAR": "another_value"
+					"GO_WANT_HELPER_PROCESS": "1",
+					"MCP_TEST_ENV_VALUE": "custom_value"
 				}
 			}
 		}
-	}`
+	}`, os.Args[0])
 	configPath := filepath.Join(tempDir, "env-config.json")
 	if err := os.WriteFile(configPath, []byte(envConfig), 0644); err != nil {
 		t.Fatalf("Failed to write config: %v", err)
 	}
 
-	// Verify the env field is parsed by re-reading with the same struct
-	var cfg struct {
-		MCP map[string]struct {
-			Command string            `json:"command,omitempty"`
-			Args    []string          `json:"args,omitempty"`
-			URL     string            `json:"url,omitempty"`
-			Env     map[string]string `json:"env,omitempty"`
-		} `json:"mcpServers"`
-	}
-	raw, err := os.ReadFile(configPath)
-	if err != nil {
-		t.Fatalf("Failed to read config: %v", err)
-	}
-	if err := json.Unmarshal(raw, &cfg); err != nil {
-		t.Fatalf("Failed to parse config: %v", err)
-	}
-	spec, ok := cfg.MCP["env-server"]
-	if !ok {
-		t.Fatal("Expected 'env-server' in config")
-	}
-	if len(spec.Env) != 2 {
-		t.Fatalf("Expected 2 env vars, got %d", len(spec.Env))
-	}
-	if spec.Env["MY_CUSTOM_VAR"] != "custom_value" {
-		t.Errorf("Expected MY_CUSTOM_VAR=custom_value, got %q", spec.Env["MY_CUSTOM_VAR"])
-	}
-	if spec.Env["ANOTHER_VAR"] != "another_value" {
-		t.Errorf("Expected ANOTHER_VAR=another_value, got %q", spec.Env["ANOTHER_VAR"])
+	cfg := &config.Config{
+		AI: config.AIConfig{
+			MCPConfigFilePath: configPath,
+		},
 	}
 
-	// Verify exec.Command gets env vars when built the same way as buildToolsFromConfig
-	cmd := exec.Command(spec.Command, spec.Args...)
-	if len(spec.Env) > 0 {
-		cmd.Env = os.Environ()
-		for k, v := range spec.Env {
-			cmd.Env = append(cmd.Env, k+"="+v)
+	tools, dispatcher, closeFn, err := buildToolsFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildToolsFromConfig failed: %v", err)
+	}
+	if closeFn != nil {
+		defer closeFn()
+	}
+
+	// The helper process serves check_env; verify it was discovered
+	if len(tools) == 0 {
+		t.Fatal("Expected tools from helper process, got 0")
+	}
+	found := false
+	for _, tool := range tools {
+		if tool.Name == "check_env" {
+			found = true
+			break
 		}
 	}
-	found := 0
-	for _, e := range cmd.Env {
-		if e == "MY_CUSTOM_VAR=custom_value" || e == "ANOTHER_VAR=another_value" {
-			found++
-		}
+	if !found {
+		t.Fatalf("Expected check_env tool, got: %v", tools)
 	}
-	if found != 2 {
-		t.Errorf("Expected both env vars in cmd.Env, found %d", found)
+
+	// Call the tool through the dispatcher — this proves env vars
+	// flowed through buildToolsFromConfig → exec.Command → subprocess.
+	result, err := dispatcher(context.Background(), ToolCall{
+		Name:      "check_env",
+		Arguments: `{"random_string":"x"}`,
+	})
+	if err != nil {
+		t.Fatalf("dispatcher failed: %v", err)
+	}
+	if !strings.Contains(result, "custom_value") {
+		t.Errorf("Expected result to contain 'custom_value', got: %s", result)
 	}
 }
 
