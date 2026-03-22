@@ -16,13 +16,12 @@ import (
 type toolCaller func(context.Context, ToolCall) (string, error)
 
 func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, func(), error) {
-	// Parse the config file
-	// TODO: support Env
 	var cfg struct {
 		MCP map[string]struct {
-			Command string   `json:"command,omitempty"`
-			Args    []string `json:"args,omitempty"`
-			URL     string   `json:"url,omitempty"`
+			Command string            `json:"command,omitempty"`
+			Args    []string          `json:"args,omitempty"`
+			URL     string            `json:"url,omitempty"`
+			Env     map[string]string `json:"env,omitempty"`
 		} `json:"mcpServers"`
 	}
 	raw, err := os.ReadFile(sysCfg.AI.MCPConfigFilePath)
@@ -42,7 +41,16 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		var tp mcp.Transport
 		switch {
 		case spec.Command != "":
-			tp = &mcp.CommandTransport{Command: exec.Command(spec.Command, spec.Args...)}
+			cmd := exec.Command(spec.Command, spec.Args...)
+			// Inherit the full parent environment so the subprocess gets PATH,
+			// HOME, etc. Config values override via last-value-wins semantics.
+			if len(spec.Env) > 0 {
+				cmd.Env = os.Environ()
+				for k, v := range spec.Env {
+					cmd.Env = append(cmd.Env, k+"="+v)
+				}
+			}
+			tp = &mcp.CommandTransport{Command: cmd}
 		case spec.URL != "":
 			tp = &mcp.StreamableClientTransport{Endpoint: spec.URL}
 		default:

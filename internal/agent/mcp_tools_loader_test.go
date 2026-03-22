@@ -4,16 +4,24 @@ package agent
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
+)
+
+const (
+	helperProcessEnvKey = "GO_WANT_HELPER_PROCESS"
+	testEnvKey          = "MCP_TEST_ENV_VALUE"
+	testEnvValue        = "custom_value"
 )
 
 func TestBuildToolsFromConfig(t *testing.T) {
@@ -216,6 +224,97 @@ func TestStreamableHTTPTransport(t *testing.T) {
 	}
 	if text.Text != "Hello, World!" {
 		t.Errorf("Expected 'Hello, World!', got %q", text.Text)
+	}
+}
+
+// TestHelperProcess is a subprocess helper for TestEnvPassedToCommand.
+// When GO_WANT_HELPER_PROCESS=1, it serves a minimal MCP server on stdio
+// with a check_env tool that returns the value of MCP_TEST_ENV_VALUE.
+func TestHelperProcess(t *testing.T) {
+	if os.Getenv(helperProcessEnvKey) != "1" {
+		return
+	}
+	srv := mcp.NewServer(&mcp.Implementation{Name: "env-test-server", Version: "1.0.0"}, nil)
+	srv.AddTool(&mcp.Tool{
+		Name:        "check_env",
+		Description: "Returns " + testEnvKey,
+		InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+	}, func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{
+			Content: []mcp.Content{&mcp.TextContent{Text: os.Getenv(testEnvKey)}},
+		}, nil
+	})
+	_ = srv.Run(context.Background(), &mcp.StdioTransport{})
+	os.Exit(0)
+}
+
+func TestEnvPassedToCommand(t *testing.T) {
+	tempDir := t.TempDir()
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	// Config that spawns this test binary as an MCP server subprocess,
+	// passing env vars through the config's env field.
+	envConfig := fmt.Sprintf(`{
+		"mcpServers": {
+			"env-test": {
+				"command": %q,
+				"args": ["-test.run=^TestHelperProcess$"],
+				"env": {
+					%q: "1",
+					%q: %q
+				}
+			}
+		}
+	}`, os.Args[0], helperProcessEnvKey, testEnvKey, testEnvValue)
+	configPath := filepath.Join(tempDir, "env-config.json")
+	if err := os.WriteFile(configPath, []byte(envConfig), 0644); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	cfg := &config.Config{
+		AI: config.AIConfig{
+			MCPConfigFilePath: configPath,
+		},
+	}
+
+	tools, dispatcher, closeFn, err := buildToolsFromConfig(cfg)
+	if err != nil {
+		t.Fatalf("buildToolsFromConfig failed: %v", err)
+	}
+	if closeFn != nil {
+		defer closeFn()
+	}
+
+	// The helper process serves check_env; verify it was discovered
+	if len(tools) == 0 {
+		t.Fatal("Expected tools from helper process, got 0")
+	}
+	found := false
+	for _, tool := range tools {
+		if tool.Name == "check_env" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("Expected check_env tool, got: %v", tools)
+	}
+
+	// Call the tool through the dispatcher — this proves env vars
+	// flowed through buildToolsFromConfig → exec.Command → subprocess.
+	// Note: "random_string" is the dummy param added by the OpenAI
+	// empty-schema workaround (see buildToolsFromConfig).
+	result, err := dispatcher(context.Background(), ToolCall{
+		Name:      "check_env",
+		Arguments: `{"random_string":"x"}`,
+	})
+	if err != nil {
+		t.Fatalf("dispatcher failed: %v", err)
+	}
+	if !strings.Contains(result, testEnvValue) {
+		t.Errorf("Expected result to contain %q, got: %s", testEnvValue, result)
 	}
 }
 
