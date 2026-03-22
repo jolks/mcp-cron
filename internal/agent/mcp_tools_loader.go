@@ -42,8 +42,8 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		switch {
 		case spec.Command != "":
 			cmd := exec.Command(spec.Command, spec.Args...)
-			// Custom env vars are appended after os.Environ(), so they override
-			// any existing values with the same key (last-value-wins on Unix).
+			// Inherit the full parent environment so the subprocess gets PATH,
+			// HOME, etc. Config values override via last-value-wins semantics.
 			if len(spec.Env) > 0 {
 				cmd.Env = os.Environ()
 				for k, v := range spec.Env {

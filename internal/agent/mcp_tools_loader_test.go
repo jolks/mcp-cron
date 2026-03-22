@@ -18,6 +18,12 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
+const (
+	helperProcessEnvKey = "GO_WANT_HELPER_PROCESS"
+	testEnvKey          = "MCP_TEST_ENV_VALUE"
+	testEnvValue        = "custom_value"
+)
+
 func TestBuildToolsFromConfig(t *testing.T) {
 	// Create a temporary directory for test files
 	tempDir, err := os.MkdirTemp("", "mcp-tools-test")
@@ -225,17 +231,17 @@ func TestStreamableHTTPTransport(t *testing.T) {
 // When GO_WANT_HELPER_PROCESS=1, it serves a minimal MCP server on stdio
 // with a check_env tool that returns the value of MCP_TEST_ENV_VALUE.
 func TestHelperProcess(t *testing.T) {
-	if os.Getenv("GO_WANT_HELPER_PROCESS") != "1" {
+	if os.Getenv(helperProcessEnvKey) != "1" {
 		return
 	}
 	srv := mcp.NewServer(&mcp.Implementation{Name: "env-test-server", Version: "1.0.0"}, nil)
 	srv.AddTool(&mcp.Tool{
 		Name:        "check_env",
-		Description: "Returns MCP_TEST_ENV_VALUE",
+		Description: "Returns " + testEnvKey,
 		InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
 	}, func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 		return &mcp.CallToolResult{
-			Content: []mcp.Content{&mcp.TextContent{Text: os.Getenv("MCP_TEST_ENV_VALUE")}},
+			Content: []mcp.Content{&mcp.TextContent{Text: os.Getenv(testEnvKey)}},
 		}, nil
 	})
 	_ = srv.Run(context.Background(), &mcp.StdioTransport{})
@@ -254,14 +260,14 @@ func TestEnvPassedToCommand(t *testing.T) {
 		"mcpServers": {
 			"env-test": {
 				"command": %q,
-				"args": ["-test.run=^TestHelperProcess$", "--"],
+				"args": ["-test.run=^TestHelperProcess$"],
 				"env": {
-					"GO_WANT_HELPER_PROCESS": "1",
-					"MCP_TEST_ENV_VALUE": "custom_value"
+					%q: "1",
+					%q: %q
 				}
 			}
 		}
-	}`, os.Args[0])
+	}`, os.Args[0], helperProcessEnvKey, testEnvKey, testEnvValue)
 	configPath := filepath.Join(tempDir, "env-config.json")
 	if err := os.WriteFile(configPath, []byte(envConfig), 0644); err != nil {
 		t.Fatalf("Failed to write config: %v", err)
@@ -298,6 +304,8 @@ func TestEnvPassedToCommand(t *testing.T) {
 
 	// Call the tool through the dispatcher — this proves env vars
 	// flowed through buildToolsFromConfig → exec.Command → subprocess.
+	// Note: "random_string" is the dummy param added by the OpenAI
+	// empty-schema workaround (see buildToolsFromConfig).
 	result, err := dispatcher(context.Background(), ToolCall{
 		Name:      "check_env",
 		Arguments: `{"random_string":"x"}`,
@@ -305,8 +313,8 @@ func TestEnvPassedToCommand(t *testing.T) {
 	if err != nil {
 		t.Fatalf("dispatcher failed: %v", err)
 	}
-	if !strings.Contains(result, "custom_value") {
-		t.Errorf("Expected result to contain 'custom_value', got: %s", result)
+	if !strings.Contains(result, testEnvValue) {
+		t.Errorf("Expected result to contain %q, got: %s", testEnvValue, result)
 	}
 }
 
