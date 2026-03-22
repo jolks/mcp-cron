@@ -52,6 +52,9 @@ MCP_CRON_ENABLE_ANTHROPIC_TESTS=true go test ./...
 | `TestRunTaskIntegration` | OpenAI AI task execution with config-based setup |
 | `TestRunTaskIntegrationAnthropic` | Anthropic AI task execution with config-based setup |
 | `TestRunTaskIntegrationListTools` | AI task lists available MCP tools (OpenAI + Anthropic subtests) |
+| `TestIntegration_QueryTaskResult` | query_task_result handler with SQL queries (JOIN across tasks and results) |
+| `TestIntegration_QueryTaskResultRejectsNonSelect` | Non-SELECT queries are rejected |
+| `TestIntegration_QueryTaskResultTruncation` | Results exceeding 1000 rows return truncation warning |
 | `TestStopWaitsForInFlightTasks` | Scheduler Stop() blocks until in-flight task goroutines complete |
 | `TestSchedulerContinuesAfterTransportExit` | Scheduler poll loop keeps running after MCP transport exits (stdin EOF) |
 
