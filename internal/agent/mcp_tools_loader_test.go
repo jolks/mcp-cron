@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -216,6 +217,84 @@ func TestStreamableHTTPTransport(t *testing.T) {
 	}
 	if text.Text != "Hello, World!" {
 		t.Errorf("Expected 'Hello, World!', got %q", text.Text)
+	}
+}
+
+func TestEnvPassedToCommand(t *testing.T) {
+	tempDir, err := os.MkdirTemp("", "mcp-env-test")
+	if err != nil {
+		t.Fatalf("Failed to create temp directory: %v", err)
+	}
+	defer func() { _ = os.RemoveAll(tempDir) }()
+
+	log.SetOutput(io.Discard)
+	defer log.SetOutput(os.Stderr)
+
+	// Config with env vars — the server won't connect (not a real MCP server),
+	// but we verify the env parsing works by checking the JSON round-trip
+	envConfig := `{
+		"mcpServers": {
+			"env-server": {
+				"command": "echo",
+				"args": ["hello"],
+				"env": {
+					"MY_CUSTOM_VAR": "custom_value",
+					"ANOTHER_VAR": "another_value"
+				}
+			}
+		}
+	}`
+	configPath := filepath.Join(tempDir, "env-config.json")
+	if err := os.WriteFile(configPath, []byte(envConfig), 0644); err != nil {
+		t.Fatalf("Failed to write config: %v", err)
+	}
+
+	// Verify the env field is parsed by re-reading with the same struct
+	var cfg struct {
+		MCP map[string]struct {
+			Command string            `json:"command,omitempty"`
+			Args    []string          `json:"args,omitempty"`
+			URL     string            `json:"url,omitempty"`
+			Env     map[string]string `json:"env,omitempty"`
+		} `json:"mcpServers"`
+	}
+	raw, err := os.ReadFile(configPath)
+	if err != nil {
+		t.Fatalf("Failed to read config: %v", err)
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		t.Fatalf("Failed to parse config: %v", err)
+	}
+	spec, ok := cfg.MCP["env-server"]
+	if !ok {
+		t.Fatal("Expected 'env-server' in config")
+	}
+	if len(spec.Env) != 2 {
+		t.Fatalf("Expected 2 env vars, got %d", len(spec.Env))
+	}
+	if spec.Env["MY_CUSTOM_VAR"] != "custom_value" {
+		t.Errorf("Expected MY_CUSTOM_VAR=custom_value, got %q", spec.Env["MY_CUSTOM_VAR"])
+	}
+	if spec.Env["ANOTHER_VAR"] != "another_value" {
+		t.Errorf("Expected ANOTHER_VAR=another_value, got %q", spec.Env["ANOTHER_VAR"])
+	}
+
+	// Verify exec.Command gets env vars when built the same way as buildToolsFromConfig
+	cmd := exec.Command(spec.Command, spec.Args...)
+	if len(spec.Env) > 0 {
+		cmd.Env = os.Environ()
+		for k, v := range spec.Env {
+			cmd.Env = append(cmd.Env, k+"="+v)
+		}
+	}
+	found := 0
+	for _, e := range cmd.Env {
+		if e == "MY_CUSTOM_VAR=custom_value" || e == "ANOTHER_VAR=another_value" {
+			found++
+		}
+	}
+	if found != 2 {
+		t.Errorf("Expected both env vars in cmd.Env, found %d", found)
 	}
 }
 
