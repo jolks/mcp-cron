@@ -3,9 +3,11 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"reflect"
 	"strings"
 
+	"github.com/jolks/mcp-cron/internal/model"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
@@ -89,6 +91,21 @@ func (s *MCPServer) registerToolsDeclarative() {
 			Parameters:  TaskResultParams{},
 		},
 	}
+
+	// Build query_task_result description with dynamic schema
+	queryDesc := fmt.Sprintf("Run a read-only SQL query against the database. Only SELECT statements are allowed. Results are capped at %d rows. The output column can be large — use SUBSTR(output,1,500) or LIMIT to manage response size.", model.MaxQueryRows)
+	if s.resultStore != nil {
+		if schema, err := s.resultStore.GetSchema(); err == nil && schema != "" {
+			queryDesc += " " + schema
+		}
+	}
+
+	tools = append(tools, ToolDefinition{
+		Name:        "query_task_result",
+		Description: queryDesc,
+		Handler:     s.handleQueryTaskResult,
+		Parameters:  QueryTaskResultParams{},
+	})
 
 	// Register all the tools
 	for _, tool := range tools {

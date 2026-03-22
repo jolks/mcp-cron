@@ -248,6 +248,7 @@ The server exposes several tools through the MCP protocol:
 8. `enable_task` - Enables a task so it runs on its schedule or can be triggered via `run_task`
 9. `disable_task` - Disables a task so it stops running and cannot be triggered
 10. `get_task_result` - Gets execution results for a task (latest by default, or recent history with `limit`)
+11. `query_task_result` - Runs a read-only SQL query against the database (SELECT only, capped at 1000 rows)
 
 ### Task Format
 
