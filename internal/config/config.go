@@ -21,18 +21,27 @@ const (
 	TransportStdio = "stdio"
 )
 
-// ResponsesAPIHosts lists hostnames known to support the OpenAI Responses API.
-// All other custom base URLs default to the Chat Completions API, which is the
-// universally supported format across third-party proxies (LiteLLM, Ollama,
-// vLLM, Groq, etc.) and translates correctly to non-OpenAI backends like
-// Anthropic.
-var ResponsesAPIHosts = []string{
+// responsesAPIHosts and responsesAPIHostSuffixes identify servers known to
+// support the OpenAI Responses API. All other custom base URLs default to the
+// Chat Completions API, which is the universally supported format across
+// third-party proxies (LiteLLM, Ollama, vLLM, Groq, etc.) and translates
+// correctly to non-OpenAI backends like Anthropic.
+var responsesAPIHosts = []string{
 	"api.openai.com",
+}
+
+// responsesAPIHostSuffixes lists hostname suffixes for wildcard matching.
+// Each entry matches any hostname ending with the suffix (e.g., ".openai.azure.com"
+// matches "myresource.openai.azure.com"). The leading dot prevents false positives
+// like "fakeopenai.azure.com".
+var responsesAPIHostSuffixes = []string{
+	".openai.azure.com",
 }
 
 // IsResponsesAPICapable returns true if baseURL points to a server known to
 // support the OpenAI Responses API. When baseURL is empty (direct OpenAI
-// default) or matches a known Responses API host, this returns true.
+// default), matches a known host exactly, or matches a known hostname suffix
+// (e.g., Azure OpenAI), this returns true.
 func IsResponsesAPICapable(baseURL string) bool {
 	if baseURL == "" {
 		return true
@@ -41,8 +50,14 @@ func IsResponsesAPICapable(baseURL string) bool {
 	if err != nil {
 		return false
 	}
-	for _, host := range ResponsesAPIHosts {
-		if u.Hostname() == host {
+	hostname := u.Hostname()
+	for _, host := range responsesAPIHosts {
+		if hostname == host {
+			return true
+		}
+	}
+	for _, suffix := range responsesAPIHostSuffixes {
+		if strings.HasSuffix(hostname, suffix) {
 			return true
 		}
 	}

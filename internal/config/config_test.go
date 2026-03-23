@@ -134,6 +134,10 @@ func TestIsResponsesAPICapable(t *testing.T) {
 		{"ollama", "http://localhost:11434/v1", false},
 		{"groq", "https://api.groq.com/openai/v1", false},
 		{"spoofed openai subdomain", "https://api.openai.com.evil.com/v1", false},
+		{"azure openai", "https://myresource.openai.azure.com/openai/v1/", true},
+		{"azure openai other resource", "https://contoso.openai.azure.com/openai/v1/", true},
+		{"spoofed azure suffix", "https://openai.azure.com.evil.com/v1", false},
+		{"spoofed azure no dot prefix", "https://fakeopenai.azure.com/v1", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
