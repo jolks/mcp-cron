@@ -120,25 +120,30 @@ func TestValidate(t *testing.T) {
 	}
 }
 
-func TestIsChatCompletionsGateway(t *testing.T) {
+func TestIsResponsesAPICapable(t *testing.T) {
 	tests := []struct {
 		name    string
 		baseURL string
 		want    bool
 	}{
-		{"empty", "", false},
-		{"direct openai", "https://api.openai.com/v1", false},
-		{"kilo gateway", "https://api.kilo.ai/api/gateway", true},
-		{"kilo with path", "https://api.kilo.ai/v1", true},
-		{"gemini", "https://generativelanguage.googleapis.com/v1beta/openai", true},
+		{"empty (direct openai default)", "", true},
+		{"direct openai", "https://api.openai.com/v1", true},
+		{"litellm proxy", "https://litellm.example.com", false},
+		{"kilo gateway", "https://api.kilo.ai/api/gateway", false},
+		{"gemini", "https://generativelanguage.googleapis.com/v1beta/openai", false},
 		{"ollama", "http://localhost:11434/v1", false},
 		{"groq", "https://api.groq.com/openai/v1", false},
+		{"spoofed openai subdomain", "https://api.openai.com.evil.com/v1", false},
+		{"azure openai", "https://myresource.openai.azure.com/openai/v1/", true},
+		{"azure openai other resource", "https://contoso.openai.azure.com/openai/v1/", true},
+		{"spoofed azure suffix", "https://openai.azure.com.evil.com/v1", false},
+		{"spoofed azure no dot prefix", "https://fakeopenai.azure.com/v1", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := IsChatCompletionsGateway(tt.baseURL)
+			got := IsResponsesAPICapable(tt.baseURL)
 			if got != tt.want {
-				t.Errorf("IsChatCompletionsGateway(%q) = %v, want %v", tt.baseURL, got, tt.want)
+				t.Errorf("IsResponsesAPICapable(%q) = %v, want %v", tt.baseURL, got, tt.want)
 			}
 		})
 	}

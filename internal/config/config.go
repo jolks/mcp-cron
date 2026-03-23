@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -20,22 +21,43 @@ const (
 	TransportStdio = "stdio"
 )
 
-// ChatCompletionsOnlyGateways lists hostnames of API proxies that support only
-// the Chat Completions API (not the Responses API). When the configured base
-// URL matches one of these, the agent falls back to the Chat Completions provider.
-var ChatCompletionsOnlyGateways = []string{
-	"api.kilo.ai",
-	"generativelanguage.googleapis.com",
+// responsesAPIHosts and responsesAPIHostSuffixes identify servers known to
+// support the OpenAI Responses API. All other custom base URLs default to the
+// Chat Completions API, which is the universally supported format across
+// third-party proxies (LiteLLM, Ollama, vLLM, Groq, etc.) and translates
+// correctly to non-OpenAI backends like Anthropic.
+var responsesAPIHosts = []string{
+	"api.openai.com",
 }
 
-// IsChatCompletionsGateway returns true if baseURL points to a known proxy
-// that only supports Chat Completions.
-func IsChatCompletionsGateway(baseURL string) bool {
+// responsesAPIHostSuffixes lists hostname suffixes for wildcard matching.
+// Each entry matches any hostname ending with the suffix (e.g., ".openai.azure.com"
+// matches "myresource.openai.azure.com"). The leading dot prevents false positives
+// like "fakeopenai.azure.com".
+var responsesAPIHostSuffixes = []string{
+	".openai.azure.com",
+}
+
+// IsResponsesAPICapable returns true if baseURL points to a server known to
+// support the OpenAI Responses API. When baseURL is empty (direct OpenAI
+// default), matches a known host exactly, or matches a known hostname suffix
+// (e.g., Azure OpenAI), this returns true.
+func IsResponsesAPICapable(baseURL string) bool {
 	if baseURL == "" {
+		return true
+	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
 		return false
 	}
-	for _, gw := range ChatCompletionsOnlyGateways {
-		if strings.Contains(baseURL, gw) {
+	hostname := u.Hostname()
+	for _, host := range responsesAPIHosts {
+		if hostname == host {
+			return true
+		}
+	}
+	for _, suffix := range responsesAPIHostSuffixes {
+		if strings.HasSuffix(hostname, suffix) {
 			return true
 		}
 	}
