@@ -35,18 +35,33 @@ func TestNewChatProvider_ExplicitOpenAI(t *testing.T) {
 	}
 }
 
-func TestNewChatProvider_GatewayUsesChatCompletions(t *testing.T) {
+func TestNewChatProvider_CustomBaseURLUsesChatCompletions(t *testing.T) {
 	cfg := config.DefaultConfig()
 	cfg.AI.Provider = "openai"
 	cfg.AI.OpenAIAPIKey = "sk-test"
-	cfg.AI.BaseURL = "https://api.kilo.ai/api/gateway"
+	cfg.AI.BaseURL = "https://litellm.example.com"
 
 	provider, err := newChatProvider(cfg)
 	if err != nil {
 		t.Fatalf("Unexpected error: %v", err)
 	}
 	if _, ok := provider.(*OpenAIProvider); !ok {
-		t.Errorf("Expected *OpenAIProvider for gateway URL, got %T", provider)
+		t.Errorf("Expected *OpenAIProvider for custom base URL, got %T", provider)
+	}
+}
+
+func TestNewChatProvider_OpenAIDirectURLUsesResponsesAPI(t *testing.T) {
+	cfg := config.DefaultConfig()
+	cfg.AI.Provider = "openai"
+	cfg.AI.OpenAIAPIKey = "sk-test"
+	cfg.AI.BaseURL = "https://api.openai.com/v1"
+
+	provider, err := newChatProvider(cfg)
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+	if _, ok := provider.(*OpenAIResponsesProvider); !ok {
+		t.Errorf("Expected *OpenAIResponsesProvider for api.openai.com URL, got %T", provider)
 	}
 }
 

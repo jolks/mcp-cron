@@ -20,22 +20,24 @@ const (
 	TransportStdio = "stdio"
 )
 
-// ChatCompletionsOnlyGateways lists hostnames of API proxies that support only
-// the Chat Completions API (not the Responses API). When the configured base
-// URL matches one of these, the agent falls back to the Chat Completions provider.
-var ChatCompletionsOnlyGateways = []string{
-	"api.kilo.ai",
-	"generativelanguage.googleapis.com",
+// ResponsesAPIHosts lists hostnames known to support the OpenAI Responses API.
+// All other custom base URLs default to the Chat Completions API, which is the
+// universally supported format across third-party proxies (LiteLLM, Ollama,
+// vLLM, Groq, etc.) and translates correctly to non-OpenAI backends like
+// Anthropic.
+var ResponsesAPIHosts = []string{
+	"api.openai.com",
 }
 
-// IsChatCompletionsGateway returns true if baseURL points to a known proxy
-// that only supports Chat Completions.
-func IsChatCompletionsGateway(baseURL string) bool {
+// IsResponsesAPICapable returns true if baseURL points to a server known to
+// support the OpenAI Responses API. When baseURL is empty (direct OpenAI
+// default) or matches a known Responses API host, this returns true.
+func IsResponsesAPICapable(baseURL string) bool {
 	if baseURL == "" {
-		return false
+		return true
 	}
-	for _, gw := range ChatCompletionsOnlyGateways {
-		if strings.Contains(baseURL, gw) {
+	for _, host := range ResponsesAPIHosts {
+		if strings.Contains(baseURL, host) {
 			return true
 		}
 	}

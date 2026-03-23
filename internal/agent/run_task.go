@@ -62,10 +62,10 @@ func newChatProvider(cfg *config.Config) (ChatProvider, error) {
 		if apiKey == "" {
 			return nil, fmt.Errorf("OpenAI API key is not set in configuration")
 		}
-		if config.IsChatCompletionsGateway(cfg.AI.BaseURL) {
-			return NewOpenAIProvider(apiKey, cfg.AI.BaseURL), nil
+		if config.IsResponsesAPICapable(cfg.AI.BaseURL) {
+			return NewOpenAIResponsesProvider(apiKey, cfg.AI.BaseURL), nil
 		}
-		return NewOpenAIResponsesProvider(apiKey, cfg.AI.BaseURL), nil
+		return NewOpenAIProvider(apiKey, cfg.AI.BaseURL), nil
 	}
 }
 
