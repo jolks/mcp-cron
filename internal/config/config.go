@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -36,8 +37,12 @@ func IsResponsesAPICapable(baseURL string) bool {
 	if baseURL == "" {
 		return true
 	}
+	u, err := url.Parse(baseURL)
+	if err != nil {
+		return false
+	}
 	for _, host := range ResponsesAPIHosts {
-		if strings.Contains(baseURL, host) {
+		if u.Hostname() == host {
 			return true
 		}
 	}

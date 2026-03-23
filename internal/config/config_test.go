@@ -133,6 +133,7 @@ func TestIsResponsesAPICapable(t *testing.T) {
 		{"gemini", "https://generativelanguage.googleapis.com/v1beta/openai", false},
 		{"ollama", "http://localhost:11434/v1", false},
 		{"groq", "https://api.groq.com/openai/v1", false},
+		{"spoofed openai subdomain", "https://api.openai.com.evil.com/v1", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
