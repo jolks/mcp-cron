@@ -85,7 +85,7 @@ To route AI tasks through a [LiteLLM](https://docs.litellm.ai/) proxy:
 }
 ```
 
-> The `--ai-model` value should match a model name in your LiteLLM proxy config. LiteLLM exposes an OpenAI-compatible API, so `--ai-provider` can be omitted (defaults to `openai`).
+> The `--ai-model` value should match a model name in your LiteLLM proxy config. LiteLLM exposes an OpenAI-compatible API, so `--ai-provider` can be omitted (defaults to `openai`). When a custom base URL is set, mcp-cron automatically uses the Chat Completions API instead of the Responses API. The Responses API is only used for direct OpenAI (`api.openai.com`) and Azure OpenAI (`*.openai.azure.com`) endpoints.
 
 > See [Command Line Arguments](#command-line-arguments) and [Environment Variables](#environment-variables) for all available options.
 
