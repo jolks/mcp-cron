@@ -68,7 +68,7 @@ func (s *MCPServer) registerToolsDeclarative() {
 		},
 		{
 			Name:        "run_task",
-			Description: "Immediately executes a task by ID. Use this to trigger on-demand tasks (created without a schedule) or to manually run a scheduled task outside its normal schedule. The task executes within ~1 second.",
+			Description: "Executes a task by ID, waits for completion, and returns the result. Use this to trigger on-demand tasks (created without a schedule) or to manually run a scheduled task outside its normal schedule.",
 			Handler:     s.handleRunTask,
 			Parameters:  TaskIDParams{},
 		},
