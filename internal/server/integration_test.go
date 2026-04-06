@@ -242,6 +242,8 @@ func mustDisableTask(t *testing.T, srv *MCPServer, id string) model.Task {
 
 // waitForResult polls get_task_result until a completed result (non-empty output
 // or non-zero exit code) appears or the deadline expires.
+//
+//nolint:unused // kept as a test utility for future use
 func waitForResult(t *testing.T, srv *MCPServer, taskID string, timeout time.Duration) model.Result {
 	t.Helper()
 	ctx := context.Background()
