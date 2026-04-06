@@ -520,8 +520,8 @@ func (s *MCPServer) handleRunTask(ctx context.Context, request *mcp.CallToolRequ
 	}
 
 	// Poll until a new result appears
-	timeout := time.After(120 * time.Second)
-	ticker := time.NewTicker(1 * time.Second)
+	timeout := time.After(s.config.Scheduler.DefaultTimeout)
+	ticker := time.NewTicker(s.config.Scheduler.PollInterval)
 	defer ticker.Stop()
 
 	for {
@@ -530,7 +530,7 @@ func (s *MCPServer) handleRunTask(ctx context.Context, request *mcp.CallToolRequ
 			return nil, ctx.Err()
 		case <-timeout:
 			return createSuccessResponse(fmt.Sprintf(
-				"Task %s triggered but did not complete within 120s. Use get_task_result to check later.", taskID))
+				"Task %s triggered but did not complete within %s. Use get_task_result to check later.", taskID, s.config.Scheduler.DefaultTimeout))
 		case <-ticker.C:
 			if result, found := s.GetTaskResult(taskID); found && result.EndTime.After(beforeTime) {
 				return createResultResponse(result)
