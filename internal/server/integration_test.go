@@ -241,7 +241,6 @@ func mustDisableTask(t *testing.T, srv *MCPServer, id string) model.Task {
 }
 
 
-
 // waitForNResults polls the result store until at least n results exist for
 // the given task, or the deadline expires.
 func waitForNResults(t *testing.T, srv *MCPServer, taskID string, n int, timeout time.Duration) []*model.Result {

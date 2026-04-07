@@ -244,7 +244,7 @@ The server exposes several tools through the MCP protocol:
 4. `add_ai_task` - Adds a new AI (LLM) task with a prompt (provide `schedule` for recurring, or omit for on-demand)
 5. `update_task` - Updates an existing task
 6. `remove_task` - Removes a task by ID
-7. `run_task` - Immediately executes a task by ID (for on-demand tasks or ad-hoc runs of scheduled tasks)
+7. `run_task` - Executes a task by ID, waits for completion, and returns the result (for on-demand tasks or ad-hoc runs of scheduled tasks)
 8. `enable_task` - Enables a task so it runs on its schedule or can be triggered via `run_task`
 9. `disable_task` - Disables a task so it stops running and cannot be triggered
 10. `get_task_result` - Gets execution results for a task (latest by default, or recent history with `limit`)
