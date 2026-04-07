@@ -499,9 +499,8 @@ func (s *MCPServer) handleDisableTask(_ context.Context, request *mcp.CallToolRe
 	return createTaskResponse(task)
 }
 
-// handleRunTask triggers immediate execution of a task
-func (s *MCPServer) handleRunTask(_ context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
-	// Extract task ID
+// handleRunTask triggers immediate execution of a task and waits for the result.
+func (s *MCPServer) handleRunTask(ctx context.Context, request *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
 	taskID, err := extractTaskIDParam(request)
 	if err != nil {
 		return nil, err
@@ -509,12 +508,35 @@ func (s *MCPServer) handleRunTask(_ context.Context, request *mcp.CallToolReques
 
 	s.logger.Debugf("Handling run_task request for task %s", taskID)
 
+	// Snapshot latest result time so we can detect the new one
+	var beforeTime time.Time
+	if latest, found := s.GetTaskResult(taskID); found {
+		beforeTime = latest.EndTime
+	}
+
 	// Trigger immediate execution
 	if err := s.scheduler.RunTaskNow(taskID); err != nil {
 		return nil, err
 	}
 
-	return createSuccessResponse(fmt.Sprintf("Task %s triggered for immediate execution", taskID))
+	// Poll until a new result appears
+	timeout := time.After(s.config.Scheduler.DefaultTimeout)
+	ticker := time.NewTicker(s.config.Scheduler.PollInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-timeout:
+			return createSuccessResponse(fmt.Sprintf(
+				"Task %s triggered but did not complete within %s. Use get_task_result to check later.", taskID, s.config.Scheduler.DefaultTimeout))
+		case <-ticker.C:
+			if result, found := s.GetTaskResult(taskID); found && result.EndTime.After(beforeTime) {
+				return createResultResponse(result)
+			}
+		}
+	}
 }
 
 // handleGetTaskResult returns execution results for a task

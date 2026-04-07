@@ -240,30 +240,6 @@ func mustDisableTask(t *testing.T, srv *MCPServer, id string) model.Task {
 	return task
 }
 
-// waitForResult polls get_task_result until a completed result (non-empty output
-// or non-zero exit code) appears or the deadline expires.
-func waitForResult(t *testing.T, srv *MCPServer, taskID string, timeout time.Duration) model.Result {
-	t.Helper()
-	ctx := context.Background()
-	deadline := time.After(timeout)
-	for {
-		select {
-		case <-deadline:
-			t.Fatalf("no completed result for task %s within %s", taskID, timeout)
-		default:
-		}
-		req := makeRequest(t, TaskResultParams{ID: taskID})
-		res, err := srv.handleGetTaskResult(ctx, req)
-		if err == nil {
-			var result model.Result
-			parseResponse(t, res, &result)
-			if result.Output != "" || result.Error != "" {
-				return result
-			}
-		}
-		time.Sleep(100 * time.Millisecond)
-	}
-}
 
 // waitForNResults polls the result store until at least n results exist for
 // the given task, or the deadline expires.
@@ -626,7 +602,10 @@ func TestIntegration_OnDemandTask(t *testing.T) {
 
 // TestIntegration_RunTask tests the run_task handler.
 func TestIntegration_RunTask(t *testing.T) {
-	srv := createIntegrationTestServer(t)
+	srv := createIntegrationTestServer(t, integrationOpts{
+		withStore:    true,
+		pollInterval: 200 * time.Millisecond,
+	})
 
 	task := mustAddShellTask(t, srv, TaskParams{
 		Name:    "run-task-test",
@@ -643,10 +622,18 @@ func TestIntegration_RunTask(t *testing.T) {
 
 	mustEnableTask(t, srv, task.ID)
 
-	// run_task on an enabled task should succeed
-	_, err = srv.handleRunTask(ctx, makeRequest(t, TaskIDParams{ID: task.ID}))
+	// run_task on an enabled task should return the actual result
+	res, err := srv.handleRunTask(ctx, makeRequest(t, TaskIDParams{ID: task.ID}))
 	if err != nil {
 		t.Fatalf("handleRunTask failed: %v", err)
+	}
+	text := res.Content[0].(*mcp.TextContent).Text
+	var result model.Result
+	if err := json.Unmarshal([]byte(text), &result); err != nil {
+		t.Fatalf("failed to parse result JSON: %v", err)
+	}
+	if !strings.Contains(result.Output, "triggered") {
+		t.Fatalf("expected output to contain 'triggered', got: %s", result.Output)
 	}
 
 	// run_task on nonexistent task should fail
@@ -748,16 +735,9 @@ func TestIntegration_OnDemandRunTaskLifecycle(t *testing.T) {
 			}
 
 			resp := mustRunTask(t, srv, task.ID)
-			if resp["success"] != true {
-				t.Errorf("expected success=true, got %v", resp["success"])
-			}
-
-			result := waitForResult(t, srv, task.ID, tc.timeout)
-			if result.ExitCode != 0 {
-				t.Errorf("expected exit_code 0, got %d (error: %s)", result.ExitCode, result.Error)
-			}
-			if !strings.Contains(result.Output, tc.wantOutput) {
-				t.Errorf("expected output to contain %q, got %q", tc.wantOutput, result.Output)
+			output, _ := resp["output"].(string)
+			if !strings.Contains(output, tc.wantOutput) {
+				t.Errorf("expected output to contain %q, got %q", tc.wantOutput, output)
 			}
 
 			// Verify task went back to idle (NextRun cleared)
@@ -838,20 +818,10 @@ func TestIntegration_ScheduledRunTaskResumesSchedule(t *testing.T) {
 				t.Fatalf("expected NextRun in the future, got %v", originalNextRun)
 			}
 
-			mustRunTask(t, srv, task.ID)
-
-			// Verify NextRun was moved to approximately now
-			triggeredTask := mustGetTask(t, srv, task.ID)
-			if triggeredTask.NextRun.After(time.Now().Add(2 * time.Second)) {
-				t.Errorf("expected NextRun ~now after run_task, got %v", triggeredTask.NextRun)
-			}
-
-			result := waitForResult(t, srv, task.ID, tc.timeout)
-			if result.ExitCode != 0 {
-				t.Errorf("expected exit_code 0, got %d (error: %s)", result.ExitCode, result.Error)
-			}
-			if !strings.Contains(result.Output, tc.wantOutput) {
-				t.Errorf("expected output to contain %q, got %q", tc.wantOutput, result.Output)
+			resp := mustRunTask(t, srv, task.ID)
+			output, _ := resp["output"].(string)
+			if !strings.Contains(output, tc.wantOutput) {
+				t.Errorf("expected output to contain %q, got %q", tc.wantOutput, output)
 			}
 
 			// Verify schedule resumed — NextRun should be back in the future
