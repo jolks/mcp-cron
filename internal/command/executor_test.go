@@ -63,6 +63,28 @@ func TestExecuteInvalidCommand(t *testing.T) {
 	}
 }
 
+func TestCommandZeroTimeout(t *testing.T) {
+	executor := NewCommandExecutor(nil, testLogger())
+	ctx := context.Background()
+
+	// Execute a command with zero timeout (no deadline)
+	result := executor.ExecuteCommand(ctx, "zero-timeout-task", "echo hello", 0)
+
+	if result == nil {
+		t.Fatal("ExecuteCommand returned nil result")
+		return
+	}
+	if result.ExitCode != 0 {
+		t.Errorf("Expected exit code 0, got %d", result.ExitCode)
+	}
+	if !strings.Contains(result.Output, "hello") {
+		t.Errorf("Expected output to contain 'hello', got: %s", result.Output)
+	}
+	if result.Error != "" {
+		t.Errorf("Expected no error, got: %v", result.Error)
+	}
+}
+
 func TestCommandTimeout(t *testing.T) {
 	executor := NewCommandExecutor(nil, testLogger())
 	ctx := context.Background()

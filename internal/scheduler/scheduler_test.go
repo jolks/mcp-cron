@@ -37,7 +37,7 @@ func testLogger() *logging.Logger {
 // createTestConfig creates a default config for testing
 func createTestConfig() *config.SchedulerConfig {
 	return &config.SchedulerConfig{
-		DefaultTimeout: 10 * time.Minute,
+		DefaultTimeout: 0,
 		PollInterval:   100 * time.Millisecond,
 	}
 }
