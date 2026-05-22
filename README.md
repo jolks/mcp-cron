@@ -1,5 +1,6 @@
 # MCP Cron
 
+[![SafeSkill 89/100](https://img.shields.io/badge/SafeSkill-89%2F100_Passes%20with%20Notes-yellow)](https://safeskill.dev/scan/jolks-mcp-cron)
 Model Context Protocol (MCP) server for scheduling and managing tasks through a standardized API. The server provides task scheduling capabilities supporting both shell commands and AI-powered tasks, all accessible via the MCP protocol.
 
 ## Features
