@@ -55,8 +55,14 @@ func (tae *TestAgentExecutor) ExecuteAgentTask(
 		Prompt:    prompt,
 	}
 
-	// Create a context with timeout
-	execCtx, cancel := context.WithTimeout(ctx, timeout)
+	// Create a context, with an optional deadline when timeout > 0
+	var execCtx context.Context
+	var cancel context.CancelFunc
+	if timeout > 0 {
+		execCtx, cancel = context.WithTimeout(ctx, timeout)
+	} else {
+		execCtx, cancel = context.WithCancel(ctx)
+	}
 	defer cancel()
 
 	// Create a task structure for RunTask
@@ -119,6 +125,26 @@ func TestExecuteAgentTask(t *testing.T) {
 	}
 	if result.Output != mockOutput {
 		t.Errorf("Expected Output '%s', got '%s'", mockOutput, result.Output)
+	}
+}
+
+func TestExecuteAgentTaskZeroTimeout(t *testing.T) {
+	// Create test executor that verifies ctx has no deadline when timeout is 0
+	executor := NewTestAgentExecutor(func(ctx context.Context, task *model.Task, cfg *config.Config) (string, error) {
+		if _, hasDeadline := ctx.Deadline(); hasDeadline {
+			t.Error("Expected context to have no deadline when timeout is 0")
+		}
+		return "zero timeout result", nil
+	})
+
+	ctx := context.Background()
+	result := executor.ExecuteAgentTask(ctx, "zero-timeout-task", "test prompt", 0)
+
+	if result.ExitCode != 0 {
+		t.Errorf("Expected ExitCode 0, got %d", result.ExitCode)
+	}
+	if result.Output != "zero timeout result" {
+		t.Errorf("Expected output 'zero timeout result', got '%s'", result.Output)
 	}
 }
 

@@ -29,7 +29,7 @@ func testLogger() *logging.Logger {
 // createTestSchedulerConfig creates a default scheduler config for testing
 func createTestSchedulerConfig() *config.SchedulerConfig {
 	return &config.SchedulerConfig{
-		DefaultTimeout: 10 * time.Minute,
+		DefaultTimeout: 0,
 	}
 }
 
