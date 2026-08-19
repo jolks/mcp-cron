@@ -198,9 +198,16 @@ func (s *MCPServer) Start(ctx context.Context) error {
 		}()
 	case config.TransportHTTP:
 		addr := fmt.Sprintf("%s:%d", s.address, s.port)
-		handler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+		var handler http.Handler = mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 			return s.server
 		}, nil)
+		if s.config.Server.AuthEnabled() {
+			handler = requireBearerToken(s.config.Server.AuthToken, handler)
+			s.logger.Infof("HTTP bearer-token authentication enabled")
+		} else if s.config.Server.UnauthenticatedNonLoopback() {
+			// Only reachable via --allow-unauthenticated; Validate() refuses otherwise
+			s.logger.Warnf("HTTP transport serving on non-loopback address %s WITHOUT authentication", addr)
+		}
 		s.httpServer = &http.Server{Addr: addr, Handler: handler}
 		s.wg.Add(1)
 		go func() {

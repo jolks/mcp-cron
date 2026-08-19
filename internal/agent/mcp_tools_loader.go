@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net/http"
 	"os"
 	"os/exec"
 
@@ -15,6 +16,22 @@ import (
 
 type toolCaller func(context.Context, ToolCall) (string, error)
 
+// headerRoundTripper injects static headers (e.g. an Authorization bearer
+// token) into every request, for HTTP MCP servers that require auth.
+type headerRoundTripper struct {
+	base    http.RoundTripper
+	headers map[string]string
+}
+
+func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	// Clone per the RoundTripper contract: the original request must not be mutated
+	req = req.Clone(req.Context())
+	for k, v := range h.headers {
+		req.Header.Set(k, v)
+	}
+	return h.base.RoundTrip(req)
+}
+
 func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, func(), error) {
 	var cfg struct {
 		MCP map[string]struct {
@@ -22,6 +39,7 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 			Args    []string          `json:"args,omitempty"`
 			URL     string            `json:"url,omitempty"`
 			Env     map[string]string `json:"env,omitempty"`
+			Headers map[string]string `json:"headers,omitempty"`
 		} `json:"mcpServers"`
 	}
 	raw, err := os.ReadFile(sysCfg.AI.MCPConfigFilePath)
@@ -52,7 +70,14 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 			}
 			tp = &mcp.CommandTransport{Command: cmd}
 		case spec.URL != "":
-			tp = &mcp.StreamableClientTransport{Endpoint: spec.URL}
+			st := &mcp.StreamableClientTransport{Endpoint: spec.URL}
+			if len(spec.Headers) > 0 {
+				st.HTTPClient = &http.Client{Transport: &headerRoundTripper{
+					base:    http.DefaultTransport,
+					headers: spec.Headers,
+				}}
+			}
+			tp = st
 		default:
 			continue
 		}

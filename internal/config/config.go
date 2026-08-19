@@ -4,6 +4,7 @@ package config
 import (
 	"fmt"
 	"log"
+	"net"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -100,6 +101,14 @@ type ServerConfig struct {
 
 	// Transport mode (http, stdio)
 	TransportMode string
+
+	// AuthToken, when set, requires HTTP requests to carry
+	// an "Authorization: Bearer <token>" header
+	AuthToken string
+
+	// AllowUnauthenticated permits serving HTTP on a non-loopback
+	// address without an auth token (dangerous)
+	AllowUnauthenticated bool
 }
 
 // SchedulerConfig holds scheduler-specific configuration
@@ -193,6 +202,29 @@ func DefaultConfig() *Config {
 	}
 }
 
+// IsLoopbackAddress reports whether addr only binds loopback interfaces.
+// The empty string (all interfaces) and unparseable hostnames are treated
+// as non-loopback (fail closed).
+func IsLoopbackAddress(addr string) bool {
+	if strings.EqualFold(addr, "localhost") {
+		return true
+	}
+	ip := net.ParseIP(addr)
+	return ip != nil && ip.IsLoopback()
+}
+
+// AuthEnabled reports whether bearer-token authentication is configured.
+func (s *ServerConfig) AuthEnabled() bool {
+	return s.AuthToken != ""
+}
+
+// UnauthenticatedNonLoopback reports whether this configuration would serve
+// the HTTP transport on a non-loopback address without authentication.
+// Validate refuses such configs unless AllowUnauthenticated is set.
+func (s *ServerConfig) UnauthenticatedNonLoopback() bool {
+	return s.TransportMode == TransportHTTP && !s.AuthEnabled() && !IsLoopbackAddress(s.Address)
+}
+
 // Validate checks if the configuration is valid
 func (c *Config) Validate() error {
 	// Validate server config
@@ -202,6 +234,10 @@ func (c *Config) Validate() error {
 
 	if c.Server.TransportMode != TransportHTTP && c.Server.TransportMode != TransportStdio {
 		return fmt.Errorf("transport mode must be either '%s' or '%s'", TransportHTTP, TransportStdio)
+	}
+
+	if c.Server.UnauthenticatedNonLoopback() && !c.Server.AllowUnauthenticated {
+		return fmt.Errorf("refusing to serve http on non-loopback address %q without authentication: set --auth-token (or MCP_CRON_SERVER_AUTH_TOKEN), or pass --allow-unauthenticated to accept the risk", c.Server.Address)
 	}
 
 	// Validate scheduler config
@@ -240,6 +276,14 @@ func FromEnv(config *Config) {
 
 	if val := os.Getenv("MCP_CRON_SERVER_TRANSPORT"); val != "" {
 		config.Server.TransportMode = val
+	}
+
+	if val := os.Getenv("MCP_CRON_SERVER_AUTH_TOKEN"); val != "" {
+		config.Server.AuthToken = val
+	}
+
+	if val := os.Getenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED"); val != "" {
+		config.Server.AllowUnauthenticated = strings.ToLower(val) == "true"
 	}
 
 	if os.Getenv("MCP_CRON_SERVER_NAME") != "" {

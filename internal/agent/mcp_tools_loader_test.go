@@ -227,6 +227,92 @@ func TestStreamableHTTPTransport(t *testing.T) {
 	}
 }
 
+func TestHeaderRoundTripperDoesNotMutateOriginal(t *testing.T) {
+	var seen http.Header
+	base := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		seen = req.Header
+		rec := httptest.NewRecorder()
+		rec.WriteHeader(http.StatusOK)
+		return rec.Result(), nil
+	})
+	rt := &headerRoundTripper{base: base, headers: map[string]string{"Authorization": "Bearer secret"}}
+
+	orig := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	resp, err := rt.RoundTrip(orig)
+	if err != nil {
+		t.Fatalf("RoundTrip failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if got := seen.Get("Authorization"); got != "Bearer secret" {
+		t.Errorf("Expected injected Authorization header, got %q", got)
+	}
+	if got := orig.Header.Get("Authorization"); got != "" {
+		t.Errorf("Original request was mutated: Authorization = %q", got)
+	}
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+func TestStreamableHTTPTransportWithHeaders(t *testing.T) {
+	// MCP server behind a bearer-token check
+	srv := mcp.NewServer(&mcp.Implementation{Name: "header-test-server", Version: "1.0.0"}, nil)
+	srv.AddTool(&mcp.Tool{
+		Name:        "ping",
+		Description: "Returns pong",
+		InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+	}, func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "pong"}}}, nil
+	})
+	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+		return srv
+	}, nil)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		mcpHandler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(ts.Close)
+
+	// mcp.json spec with the new headers field
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "mcp.json")
+	mcpConfig := fmt.Sprintf(`{
+		"mcpServers": {
+			"header-server": {
+				"url": %q,
+				"headers": {"Authorization": "Bearer secret"}
+			}
+		}
+	}`, ts.URL)
+	if err := os.WriteFile(configPath, []byte(mcpConfig), 0644); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	cfg := &config.Config{AI: config.AIConfig{MCPConfigFilePath: configPath}}
+	tools, dispatcher, closeFn, err := buildToolsFromConfig(cfg)
+	if closeFn != nil {
+		defer closeFn()
+	}
+	if err != nil {
+		t.Fatalf("buildToolsFromConfig failed: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "ping" {
+		t.Fatalf("Expected 1 tool 'ping', got %v", tools)
+	}
+	out, err := dispatcher(context.Background(), ToolCall{Name: "ping", Arguments: `{}`})
+	if err != nil {
+		t.Fatalf("dispatcher failed: %v", err)
+	}
+	if !strings.Contains(out, "pong") {
+		t.Errorf("Expected tool output to contain 'pong', got %q", out)
+	}
+}
+
 // TestHelperProcess is a subprocess helper for TestEnvPassedToCommand.
 // When GO_WANT_HELPER_PROCESS=1, it serves a minimal MCP server on stdio
 // with a check_env tool that returns the value of MCP_TEST_ENV_VALUE.

@@ -28,6 +28,8 @@ var (
 	address         = flag.String("address", "", "The address to bind the server to")
 	port            = flag.Int("port", 0, "The port to bind the server to")
 	transport       = flag.String("transport", "", "Transport mode: http or stdio")
+	authToken       = flag.String("auth-token", "", "Bearer token required for HTTP transport requests (prefer MCP_CRON_SERVER_AUTH_TOKEN to keep it out of process listings)")
+	allowUnauth     = flag.Bool("allow-unauthenticated", false, "Allow HTTP transport on a non-loopback address without an auth token (dangerous)")
 	logLevel        = flag.String("log-level", "", "Logging level: debug, info, warn, error, fatal")
 	logFile         = flag.String("log-file", "", "Log file path (default: stdout)")
 	version         = flag.Bool("version", false, "Show version information and exit")
@@ -44,14 +46,15 @@ var (
 func main() {
 	flag.Parse()
 
-	// Load configuration
-	cfg := loadConfig()
-
-	// Show version and exit if requested
+	// Show version and exit if requested (before config validation,
+	// so --version works even under an invalid configuration)
 	if *version {
 		log.Printf("%s version %s", config.ServerName, config.Version)
 		os.Exit(0)
 	}
+
+	// Load configuration
+	cfg := loadConfig()
 
 	// Try to become the primary instance for this db-path.
 	// Primary: enters keep-alive mode after transport exits (scheduler continues).
@@ -112,6 +115,12 @@ func applyCommandLineFlagsToConfig(cfg *config.Config) {
 	}
 	if *transport != "" {
 		cfg.Server.TransportMode = *transport
+	}
+	if *authToken != "" {
+		cfg.Server.AuthToken = *authToken
+	}
+	if *allowUnauth {
+		cfg.Server.AllowUnauthenticated = true
 	}
 	if *logLevel != "" {
 		cfg.Logging.Level = *logLevel

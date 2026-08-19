@@ -120,6 +120,82 @@ func TestValidate(t *testing.T) {
 	}
 }
 
+func TestIsLoopbackAddress(t *testing.T) {
+	tests := []struct {
+		addr string
+		want bool
+	}{
+		{"localhost", true},
+		{"LOCALHOST", true},
+		{"127.0.0.1", true},
+		{"127.0.0.2", true},
+		{"::1", true},
+		{"", false},
+		{"0.0.0.0", false},
+		{"::", false},
+		{"192.168.1.5", false},
+		{"example.com", false},
+	}
+	for _, tt := range tests {
+		if got := IsLoopbackAddress(tt.addr); got != tt.want {
+			t.Errorf("IsLoopbackAddress(%q) = %v, want %v", tt.addr, got, tt.want)
+		}
+	}
+}
+
+func TestValidateAuth(t *testing.T) {
+	// HTTP on non-loopback without token must fail
+	noToken := DefaultConfig()
+	noToken.Server.Address = "0.0.0.0"
+	if err := noToken.Validate(); err == nil {
+		t.Error("Expected error for http on non-loopback address without auth token, got nil")
+	}
+
+	// Same address with a token is valid
+	withToken := DefaultConfig()
+	withToken.Server.Address = "0.0.0.0"
+	withToken.Server.AuthToken = "secret"
+	if err := withToken.Validate(); err != nil {
+		t.Errorf("Expected no error with auth token set, got: %v", err)
+	}
+
+	// Same address with explicit override is valid
+	withOverride := DefaultConfig()
+	withOverride.Server.Address = "0.0.0.0"
+	withOverride.Server.AllowUnauthenticated = true
+	if err := withOverride.Validate(); err != nil {
+		t.Errorf("Expected no error with AllowUnauthenticated, got: %v", err)
+	}
+
+	// Stdio mode is unaffected by the address
+	stdio := DefaultConfig()
+	stdio.Server.TransportMode = TransportStdio
+	stdio.Server.Address = "0.0.0.0"
+	if err := stdio.Validate(); err != nil {
+		t.Errorf("Expected no error for stdio mode on non-loopback address, got: %v", err)
+	}
+}
+
+func TestFromEnvAuth(t *testing.T) {
+	t.Setenv("MCP_CRON_SERVER_AUTH_TOKEN", "env-secret")
+	t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", "TRUE")
+	cfg := DefaultConfig()
+	FromEnv(cfg)
+	if cfg.Server.AuthToken != "env-secret" {
+		t.Errorf("Expected auth token 'env-secret', got '%s'", cfg.Server.AuthToken)
+	}
+	if !cfg.Server.AllowUnauthenticated {
+		t.Error("Expected AllowUnauthenticated true for 'TRUE'")
+	}
+
+	t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", "false")
+	cfg = DefaultConfig()
+	FromEnv(cfg)
+	if cfg.Server.AllowUnauthenticated {
+		t.Error("Expected AllowUnauthenticated false for 'false'")
+	}
+}
+
 func TestIsResponsesAPICapable(t *testing.T) {
 	tests := []struct {
 		name    string

@@ -165,6 +165,8 @@ The following command line arguments are supported:
 | `--address` | The address to bind the server to | `localhost` |
 | `--port` | The port to bind the server to | `8080` |
 | `--transport` | Transport mode: `http` or `stdio` | `http` |
+| `--auth-token` | Bearer token required for HTTP transport requests (prefer `MCP_CRON_SERVER_AUTH_TOKEN` to keep it out of process listings) | Not set |
+| `--allow-unauthenticated` | Allow HTTP transport on a non-loopback address without an auth token (dangerous) | `false` |
 | `--log-level` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `--log-file` | Log file path | stdout |
 | `--version` | Show version information and exit | `false` |
@@ -186,6 +188,8 @@ The following environment variables are supported:
 | `MCP_CRON_SERVER_ADDRESS` | The address to bind the server to | `localhost` |
 | `MCP_CRON_SERVER_PORT` | The port to bind the server to | `8080` |
 | `MCP_CRON_SERVER_TRANSPORT` | Transport mode: `http` or `stdio` | `http` |
+| `MCP_CRON_SERVER_AUTH_TOKEN` | Bearer token required for HTTP transport requests | Not set |
+| `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED` | Allow HTTP transport on a non-loopback address without an auth token (dangerous) | `false` |
 | `MCP_CRON_SERVER_NAME` | **Deprecated** — ignored; the server name is fixed to ensure self-reference detection works correctly | - |
 | `MCP_CRON_SERVER_VERSION` | **Deprecated** — ignored; version is set at build time via ldflags | - |
 | `MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT` | Default timeout for task execution | `10m` |
@@ -203,6 +207,50 @@ The following environment variables are supported:
 | `MCP_CRON_STORE_DB_PATH` | Path to SQLite database for result history | `~/.mcp-cron/results.db` |
 | `MCP_CRON_PREVENT_SLEEP` | Prevent system from sleeping while mcp-cron is running (macOS and Windows) | `false` |
 | `MCP_CRON_POLL_INTERVAL` | How often to check for due tasks (Go duration format) | `1s` |
+
+### Authentication
+
+The HTTP transport supports optional bearer-token authentication. When a token is set, every HTTP request must carry an `Authorization: Bearer <token>` header; requests without it are rejected with `401 Unauthorized`.
+
+**Fail-closed rule**: binding a non-loopback address (e.g. `0.0.0.0`) in HTTP mode **requires** an auth token — without one, mcp-cron refuses to start. This is because the exposed MCP tools (`add_task`, `run_task`, ...) execute arbitrary shell commands; serving them unauthenticated on a network interface would be remote command execution for anyone who can reach the port. The default `localhost` bind needs no token.
+
+```bash
+# Loopback (default) — no token required
+./mcp-cron
+
+# Non-loopback — token required
+MCP_CRON_SERVER_AUTH_TOKEN="$TOKEN" ./mcp-cron --address 0.0.0.0
+
+# Refused: non-loopback without a token
+./mcp-cron --address 0.0.0.0
+# Invalid configuration: refusing to serve http on non-loopback address "0.0.0.0" without authentication ...
+
+# Explicit opt-out, e.g. inside an isolated Docker network where port
+# mapping or a service mesh already restricts access (dangerous otherwise)
+./mcp-cron --address 0.0.0.0 --allow-unauthenticated
+```
+
+Verify with curl:
+```bash
+curl -i http://localhost:8080/                                   # 401 Unauthorized
+curl -i -H "Authorization: Bearer $TOKEN" http://localhost:8080/ # authenticated
+```
+
+MCP clients pass the token via the `headers` field:
+```json
+{
+  "mcpServers": {
+    "mcp-cron": {
+      "url": "http://localhost:8080",
+      "headers": {
+        "Authorization": "Bearer <token>"
+      }
+    }
+  }
+}
+```
+
+The same `headers` field works in mcp-cron's own MCP configuration file (`--mcp-config-path`), so AI tasks can connect to bearer-token-protected MCP servers too.
 
 ### Sleep Prevention
 
