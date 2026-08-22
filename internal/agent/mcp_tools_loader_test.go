@@ -9,9 +9,11 @@ import (
 	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jolks/mcp-cron/internal/config"
@@ -255,6 +257,124 @@ func TestHeaderRoundTripperDoesNotMutateOriginal(t *testing.T) {
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+// TestHeaderInjectingClientRefusesCrossOriginRedirect guards against token
+// leakage: net/http strips Authorization on a cross-host redirect, but
+// headerRoundTripper sits below that logic and would re-add it. The client
+// must refuse the hop so the configured headers never reach the other origin.
+func TestHeaderInjectingClientRefusesCrossOriginRedirect(t *testing.T) {
+	var attackerHits int32
+	var leaked http.Header
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attackerHits, 1)
+		leaked = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(attacker.Close)
+
+	// Both httptest servers listen on 127.0.0.1; different ports make them
+	// different origins — exactly the case the policy must reject.
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, attacker.URL+"/collect", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(origin.Close)
+
+	client := newHeaderInjectingClient(map[string]string{"Authorization": "Bearer secret"})
+	resp, err := client.Post(origin.URL+"/mcp", "application/json", strings.NewReader(`{}`))
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected cross-origin redirect to be refused, got nil error")
+	}
+	if !strings.Contains(err.Error(), "refusing redirect") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if n := atomic.LoadInt32(&attackerHits); n != 0 {
+		t.Errorf("redirect target was contacted %d time(s); leaked headers: %v", n, leaked)
+	}
+}
+
+func TestHeaderInjectingClientFollowsSameOriginRedirect(t *testing.T) {
+	var finalAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/mcp/", http.StatusPermanentRedirect)
+	})
+	mux.HandleFunc("/mcp/", func(w http.ResponseWriter, r *http.Request) {
+		finalAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	client := newHeaderInjectingClient(map[string]string{"Authorization": "Bearer secret"})
+	resp, err := client.Post(srv.URL+"/mcp", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("same-origin redirect should be followed: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 after redirect, got %d", resp.StatusCode)
+	}
+	if finalAuth != "Bearer secret" {
+		t.Errorf("expected Authorization to be present on same-origin redirect, got %q", finalAuth)
+	}
+}
+
+func TestHeaderInjectingClientStopsAfterMaxRedirects(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/loop", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := newHeaderInjectingClient(map[string]string{"X-Test": "1"})
+	resp, err := client.Get(srv.URL + "/loop")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "stopped after 10 redirects") {
+		t.Errorf("expected redirect limit error, got %v", err)
+	}
+}
+
+func TestRefuseCrossOriginRedirectPolicy(t *testing.T) {
+	cases := []struct {
+		name    string
+		from    string
+		to      string
+		allowed bool
+	}{
+		{"same origin, different path", "https://mcp.example.com/mcp", "https://mcp.example.com/mcp/", true},
+		{"same origin, explicit default port", "https://mcp.example.com/mcp", "https://mcp.example.com:443/mcp", true},
+		{"host case-insensitive", "https://MCP.example.com/mcp", "https://mcp.EXAMPLE.com/mcp", true},
+		{"http to https upgrade on default ports", "http://mcp.example.com/mcp", "https://mcp.example.com/mcp", true},
+		{"https to http downgrade", "https://mcp.example.com/mcp", "http://mcp.example.com/mcp", false},
+		{"different host", "https://mcp.example.com/mcp", "https://evil.example/collect", false},
+		{"subdomain", "https://example.com/mcp", "https://mcp.example.com/mcp", false},
+		{"different port", "http://localhost:8080/mcp", "http://localhost:9090/mcp", false},
+		{"http to https on non-default port", "http://localhost:8080/mcp", "https://localhost:8443/mcp", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			from, err := url.Parse(tc.from)
+			if err != nil {
+				t.Fatal(err)
+			}
+			to, err := url.Parse(tc.to)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = refuseCrossOriginRedirect(&http.Request{URL: to}, []*http.Request{{URL: from}})
+			if tc.allowed && err != nil {
+				t.Errorf("expected redirect %s -> %s to be allowed, got %v", tc.from, tc.to, err)
+			}
+			if !tc.allowed && err == nil {
+				t.Errorf("expected redirect %s -> %s to be refused", tc.from, tc.to)
+			}
+		})
+	}
+}
 
 func TestStreamableHTTPTransportWithHeaders(t *testing.T) {
 	// MCP server behind a bearer-token check

@@ -250,7 +250,7 @@ MCP clients pass the token via the `headers` field:
 }
 ```
 
-The same `headers` field works in mcp-cron's own MCP configuration file (`--mcp-config-path`), so AI tasks can connect to bearer-token-protected MCP servers too.
+The same `headers` field works in mcp-cron's own MCP configuration file (`--mcp-config-path`), so AI tasks can connect to bearer-token-protected MCP servers too. When `headers` is set, redirects are only followed within the configured origin (same scheme, host and port, or an `http`→`https` upgrade); a redirect to any other origin fails the connection so the configured credentials are never sent elsewhere.
 
 ### Sleep Prevention
 

@@ -7,8 +7,10 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
+	"strings"
 
 	"github.com/jolks/mcp-cron/internal/config"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
@@ -30,6 +32,66 @@ func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 		req.Header.Set(k, v)
 	}
 	return h.base.RoundTrip(req)
+}
+
+// maxRedirects mirrors net/http's default redirect limit.
+const maxRedirects = 10
+
+// newHeaderInjectingClient builds the HTTP client used for MCP servers that
+// need static headers. Because headerRoundTripper injects headers *below*
+// http.Client's redirect logic, the stdlib's protection — stripping
+// Authorization when a redirect crosses to another host — would be undone:
+// the client strips the header, then the round tripper adds it back on the
+// redirected request. To keep credentials from ever reaching an origin the
+// user did not configure, redirects are only followed when they stay on the
+// original origin (scheme, host, port), with one exception: a same-host
+// http→https upgrade on default ports. This is the same policy as httpx
+// (Python MCP SDK) and matches fetch (TypeScript MCP SDK), which drop
+// Authorization on any cross-origin redirect.
+func newHeaderInjectingClient(headers map[string]string) *http.Client {
+	return &http.Client{
+		Transport:     &headerRoundTripper{base: http.DefaultTransport, headers: headers},
+		CheckRedirect: refuseCrossOriginRedirect,
+	}
+}
+
+// refuseCrossOriginRedirect is an http.Client.CheckRedirect policy that allows
+// same-origin redirects (plus http→https upgrades) and rejects any other hop.
+func refuseCrossOriginRedirect(req *http.Request, via []*http.Request) error {
+	if len(via) >= maxRedirects {
+		return fmt.Errorf("stopped after %d redirects", maxRedirects)
+	}
+	origin := via[0].URL
+	if !sameOriginOrHTTPSUpgrade(origin, req.URL) {
+		return fmt.Errorf("refusing redirect from %s://%s to %s://%s: configured headers would be sent to a different origin",
+			origin.Scheme, origin.Host, req.URL.Scheme, req.URL.Host)
+	}
+	return nil
+}
+
+func sameOriginOrHTTPSUpgrade(from, to *url.URL) bool {
+	if !strings.EqualFold(from.Hostname(), to.Hostname()) {
+		return false
+	}
+	fromScheme, toScheme := strings.ToLower(from.Scheme), strings.ToLower(to.Scheme)
+	fromPort, toPort := effectivePort(from), effectivePort(to)
+	if fromScheme == toScheme {
+		return fromPort == toPort
+	}
+	return fromScheme == "http" && toScheme == "https" && fromPort == "80" && toPort == "443"
+}
+
+func effectivePort(u *url.URL) string {
+	if p := u.Port(); p != "" {
+		return p
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "http":
+		return "80"
+	case "https":
+		return "443"
+	}
+	return ""
 }
 
 func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, func(), error) {
@@ -72,10 +134,7 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		case spec.URL != "":
 			st := &mcp.StreamableClientTransport{Endpoint: spec.URL}
 			if len(spec.Headers) > 0 {
-				st.HTTPClient = &http.Client{Transport: &headerRoundTripper{
-					base:    http.DefaultTransport,
-					headers: spec.Headers,
-				}}
+				st.HTTPClient = newHeaderInjectingClient(spec.Headers)
 			}
 			tp = st
 		default:
