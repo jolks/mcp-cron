@@ -208,6 +208,10 @@ The following environment variables are supported:
 | `MCP_CRON_PREVENT_SLEEP` | Prevent system from sleeping while mcp-cron is running (macOS and Windows). Accepts `true`/`false`/`1`/`0` (case-insensitive) | `false` |
 | `MCP_CRON_POLL_INTERVAL` | How often to check for due tasks (Go duration format) | `1s` |
 
+### Configuration Precedence
+
+Defaults are overridden by environment variables, which are overridden by command-line flags that are explicitly set. Boolean flags (`--allow-unauthenticated`, `--prevent-sleep`) can only turn a setting on: passing `--allow-unauthenticated=false` does not override `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=true`, and `--auth-token ""` does not clear `MCP_CRON_SERVER_AUTH_TOKEN`. To disable a setting that is enabled in the environment, unset the variable.
+
 ### Authentication
 
 The HTTP transport supports optional bearer-token authentication. When a token is set, every HTTP request must carry an `Authorization: Bearer <token>` header; requests without it are rejected with `401 Unauthorized`.
@@ -215,6 +219,8 @@ The HTTP transport supports optional bearer-token authentication. When a token i
 Surrounding whitespace in the token is trimmed (so a secret file created with `echo` still works); a token containing internal whitespace or control characters is rejected at startup, since no HTTP request could ever present it.
 
 **Fail-closed rule**: binding a non-loopback address (e.g. `0.0.0.0`) in HTTP mode **requires** an auth token — without one, mcp-cron refuses to start. This is because the exposed MCP tools (`add_task`, `run_task`, ...) execute arbitrary shell commands; serving them unauthenticated on a network interface would be remote command execution for anyone who can reach the port. The default `localhost` bind needs no token.
+
+"Loopback" means the literal `localhost` or a loopback IP (`127.0.0.0/8`, `::1`, including bracketed or zoned forms such as `[::1]` and `::1%lo0`). Other hostnames — even ones that resolve to a loopback address, such as `ip6-localhost` or `localhost.localdomain` — are treated as non-loopback. This is deliberate: names are not resolved at validation time (resolution can change between check and use), and it is the same rule the MCP Go SDK applies for its own localhost protection. Use the IP literal, or `--allow-unauthenticated` if you accept the risk.
 
 ```bash
 # Loopback (default) — no token required
