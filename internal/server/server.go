@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -75,6 +76,7 @@ type MCPServer struct {
 	resultStore    model.ResultStore
 	server         *mcp.Server
 	httpServer     *http.Server
+	listener       net.Listener
 	cancel         context.CancelFunc
 	address        string
 	port           int
@@ -198,6 +200,14 @@ func (s *MCPServer) Start(ctx context.Context) error {
 		}()
 	case config.TransportHTTP:
 		addr := config.JoinHostPort(s.address, s.port)
+		// Enforce the fail-closed rule here as well as in config.Validate():
+		// this is the layer that opens the socket, and Validate() only runs
+		// from the CLI entry point. Exposing the task tools (arbitrary shell
+		// execution) unauthenticated on a network interface must be an
+		// explicit opt-in no matter how the server was constructed.
+		if s.config.Server.UnauthenticatedNonLoopback() && !s.config.Server.AllowUnauthenticated {
+			return fmt.Errorf("refusing to serve http on non-loopback address %q without authentication: set an auth token, or explicitly allow unauthenticated access", s.address)
+		}
 		var handler http.Handler = mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 			return s.server
 		}, nil)
@@ -205,14 +215,20 @@ func (s *MCPServer) Start(ctx context.Context) error {
 			handler = requireBearerToken(s.config.Server.AuthToken, handler)
 			s.logger.Infof("HTTP bearer-token authentication enabled")
 		} else if s.config.Server.UnauthenticatedNonLoopback() {
-			// Only reachable via --allow-unauthenticated; Validate() refuses otherwise
 			s.logger.Warnf("HTTP transport serving on non-loopback address %s WITHOUT authentication", addr)
 		}
+		// Bind synchronously so a port clash or bad address fails Start()
+		// instead of being logged from a goroutine after startup "succeeded".
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s: %w", addr, err)
+		}
+		s.listener = ln
 		s.httpServer = &http.Server{Addr: addr, Handler: handler}
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := s.httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
 				s.logger.Errorf("Error running MCP server: %v", err)
 			}
 		}()
@@ -264,6 +280,15 @@ func (s *MCPServer) Stop() error {
 
 	s.wg.Wait()
 	return nil
+}
+
+// ListenAddr returns the address the HTTP transport is bound to, or nil if
+// the server is not serving HTTP. Useful when the configured port is 0.
+func (s *MCPServer) ListenAddr() net.Addr {
+	if s.listener == nil {
+		return nil
+	}
+	return s.listener.Addr()
 }
 
 // Done returns a channel that is closed when the server's transport exits.
