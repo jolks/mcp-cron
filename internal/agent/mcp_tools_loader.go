@@ -5,7 +5,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"net/url"
 	"os"
@@ -13,10 +12,28 @@ import (
 	"strings"
 
 	"github.com/jolks/mcp-cron/internal/config"
+	"github.com/jolks/mcp-cron/internal/logging"
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
 type toolCaller func(context.Context, ToolCall) (string, error)
+
+// reservedHeaders are derived from connection state by the go-sdk on every
+// request and must never be overridden by a static value from mcp.json; a
+// stale session id or protocol version would make the server reject the
+// request. This mirrors the TypeScript SDK's RESERVED_REQUEST_HEADER_NAMES.
+// Everything else — including Authorization, Accept and Content-Type — is
+// left to the user, consistent with the TypeScript and Python SDKs.
+var reservedHeaders = map[string]bool{
+	"Mcp-Session-Id":       true,
+	"Mcp-Protocol-Version": true,
+}
+
+// isReservedHeader reports whether a user-configured header name is one the
+// transport owns.
+func isReservedHeader(name string) bool {
+	return reservedHeaders[http.CanonicalHeaderKey(name)]
+}
 
 // headerRoundTripper injects static headers (e.g. an Authorization bearer
 // token) into every request, for HTTP MCP servers that require auth.
@@ -29,6 +46,9 @@ func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	// Clone per the RoundTripper contract: the original request must not be mutated
 	req = req.Clone(req.Context())
 	for k, v := range h.headers {
+		if isReservedHeader(k) {
+			continue
+		}
 		req.Header.Set(k, v)
 	}
 	return h.base.RoundTrip(req)
@@ -112,6 +132,8 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		return nil, nil, nil, err
 	}
 
+	logger := logging.GetDefaultLogger()
+
 	// Create a go-sdk client per server and collect its tools
 	var tools []ToolDefinition
 	sessionBySrv := map[string]*mcp.ClientSession{}
@@ -134,6 +156,11 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		case spec.URL != "":
 			st := &mcp.StreamableClientTransport{Endpoint: spec.URL}
 			if len(spec.Headers) > 0 {
+				for k := range spec.Headers {
+					if isReservedHeader(k) {
+						logger.Warnf("MCP server %q: ignoring configured header %q; it is set per request by the transport", name, k)
+					}
+				}
 				st.HTTPClient = newHeaderInjectingClient(spec.Headers)
 			}
 			tp = st
@@ -144,7 +171,7 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		cli := mcp.NewClient(&mcp.Implementation{Name: "mcp-cron", Version: "1.0.0"}, nil)
 		session, err := cli.Connect(context.Background(), tp, nil)
 		if err != nil {
-			log.Printf("Failed to connect to server %s: %v\n", name, err)
+			logger.Warnf("Failed to connect to MCP server %q; its tools will be unavailable for this AI task: %v", name, err)
 			continue
 		}
 
@@ -154,7 +181,7 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		// We must close the session to kill the spawned child process,
 		// otherwise it loads tasks from SQLite and schedules duplicates.
 		if res := session.InitializeResult(); res != nil && res.ServerInfo != nil && res.ServerInfo.Name == config.ServerName {
-			log.Printf("Skipping MCP server %q: detected as mcp-cron (self-reference)\n", name)
+			logger.Infof("Skipping MCP server %q: detected as mcp-cron (self-reference)", name)
 			_ = session.Close()
 			continue
 		}
@@ -163,7 +190,7 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 
 		resp, err := session.ListTools(context.Background(), nil)
 		if err != nil {
-			log.Printf("Failed to list tools for server %s: %v\n", name, err)
+			logger.Warnf("Failed to list tools for MCP server %q: %v", name, err)
 			continue
 		}
 		for _, tl := range resp.Tools {
@@ -173,14 +200,14 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 				if b, err := json.Marshal(tl.InputSchema); err == nil {
 					rawSchema = b
 				} else {
-					log.Printf("Failed to marshal input schema for tool %s: %v\n", tl.Name, err)
+					logger.Warnf("Failed to marshal input schema for tool %s: %v", tl.Name, err)
 					continue
 				}
 			}
 			// Unmarshal into map[string]interface{} for the SDK
 			var params map[string]interface{}
 			if err := json.Unmarshal(rawSchema, &params); err != nil {
-				log.Printf("Failed to unmarshal input schema for tool %s: %v\n", tl.Name, err)
+				logger.Warnf("Failed to unmarshal input schema for tool %s: %v", tl.Name, err)
 				continue
 			}
 
@@ -196,7 +223,7 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 				}
 				params["properties"] = props
 				params["required"] = []string{"random_string"}
-				log.Printf("Added dummy parameter to empty schema for tool %s\n", tl.Name)
+				logger.Debugf("Added dummy parameter to empty schema for tool %s", tl.Name)
 			}
 
 			tools = append(tools, ToolDefinition{

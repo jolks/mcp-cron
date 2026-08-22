@@ -254,6 +254,47 @@ func TestHeaderRoundTripperDoesNotMutateOriginal(t *testing.T) {
 	}
 }
 
+// TestHeaderRoundTripperSkipsReservedHeaders: headers the transport derives
+// from connection state must not be overridable from mcp.json, while
+// everything else (including Authorization) is injected as configured.
+func TestHeaderRoundTripperSkipsReservedHeaders(t *testing.T) {
+	var seen http.Header
+	base := roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		seen = req.Header
+		rec := httptest.NewRecorder()
+		rec.WriteHeader(http.StatusOK)
+		return rec.Result(), nil
+	})
+	rt := &headerRoundTripper{base: base, headers: map[string]string{
+		"Authorization":        "Bearer secret",
+		"mcp-session-id":       "stale-session",
+		"MCP-Protocol-Version": "1970-01-01",
+		"X-Custom":             "kept",
+	}}
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/", nil)
+	req.Header.Set("Mcp-Session-Id", "live-session")
+	req.Header.Set("Mcp-Protocol-Version", "2025-06-18")
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if got := seen.Get("Mcp-Session-Id"); got != "live-session" {
+		t.Errorf("Mcp-Session-Id = %q, want the transport's live value", got)
+	}
+	if got := seen.Get("Mcp-Protocol-Version"); got != "2025-06-18" {
+		t.Errorf("Mcp-Protocol-Version = %q, want the transport's value", got)
+	}
+	if got := seen.Get("Authorization"); got != "Bearer secret" {
+		t.Errorf("Authorization = %q, want injected value", got)
+	}
+	if got := seen.Get("X-Custom"); got != "kept" {
+		t.Errorf("X-Custom = %q, want injected value", got)
+	}
+}
+
 type roundTripperFunc func(*http.Request) (*http.Response, error)
 
 func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
