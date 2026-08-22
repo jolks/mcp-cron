@@ -212,6 +212,8 @@ The following environment variables are supported:
 
 The HTTP transport supports optional bearer-token authentication. When a token is set, every HTTP request must carry an `Authorization: Bearer <token>` header; requests without it are rejected with `401 Unauthorized`.
 
+Surrounding whitespace in the token is trimmed (so a secret file created with `echo` still works); a token containing internal whitespace or control characters is rejected at startup, since no HTTP request could ever present it.
+
 **Fail-closed rule**: binding a non-loopback address (e.g. `0.0.0.0`) in HTTP mode **requires** an auth token — without one, mcp-cron refuses to start. This is because the exposed MCP tools (`add_task`, `run_task`, ...) execute arbitrary shell commands; serving them unauthenticated on a network interface would be remote command execution for anyone who can reach the port. The default `localhost` bind needs no token.
 
 ```bash

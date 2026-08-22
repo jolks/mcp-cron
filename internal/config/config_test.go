@@ -5,6 +5,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -210,6 +211,28 @@ func TestValidateAuth(t *testing.T) {
 	if err := stdio.Validate(); err != nil {
 		t.Errorf("Expected no error for stdio mode on non-loopback address, got: %v", err)
 	}
+
+	// Tokens that can never match an HTTP request are rejected at startup
+	for _, bad := range []string{"sec ret", "secret\n", "secret\t", "\tsecret", "sec\x00ret"} {
+		cfg := DefaultConfig()
+		cfg.Server.AuthToken = bad
+		err := cfg.Validate()
+		if err == nil {
+			t.Errorf("Expected error for auth token %q containing whitespace/control char, got nil", bad)
+			continue
+		}
+		if strings.Contains(err.Error(), bad) {
+			t.Errorf("Validation error must not echo the token; got %q", err)
+		}
+	}
+	// Ordinary tokens, including ones outside the b64token alphabet, are fine
+	for _, ok := range []string{"secret", "s3cr3t-token_with.dots~and+slashes/==", "p@ss:w0rd!"} {
+		cfg := DefaultConfig()
+		cfg.Server.AuthToken = ok
+		if err := cfg.Validate(); err != nil {
+			t.Errorf("Expected no error for auth token %q, got: %v", ok, err)
+		}
+	}
 }
 
 func TestFromEnvAuth(t *testing.T) {
@@ -229,6 +252,23 @@ func TestFromEnvAuth(t *testing.T) {
 	FromEnv(cfg)
 	if cfg.Server.AllowUnauthenticated {
 		t.Error("Expected AllowUnauthenticated false for 'false'")
+	}
+
+	// Surrounding whitespace (e.g. a trailing newline from `echo` into a
+	// secret file) is trimmed so the token actually matches requests
+	t.Setenv("MCP_CRON_SERVER_AUTH_TOKEN", " env-secret\n")
+	cfg = DefaultConfig()
+	FromEnv(cfg)
+	if cfg.Server.AuthToken != "env-secret" {
+		t.Errorf("Expected trimmed auth token 'env-secret', got %q", cfg.Server.AuthToken)
+	}
+
+	// Whitespace-only is treated as unset
+	t.Setenv("MCP_CRON_SERVER_AUTH_TOKEN", "  \n")
+	cfg = DefaultConfig()
+	FromEnv(cfg)
+	if cfg.Server.AuthToken != "" {
+		t.Errorf("Expected whitespace-only token to be treated as unset, got %q", cfg.Server.AuthToken)
 	}
 }
 

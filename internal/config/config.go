@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 )
 
 // ServerName is the fixed server name used for MCP identity and self-reference detection.
@@ -225,6 +226,20 @@ func JoinHostPort(host string, port int) string {
 	return net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port))
 }
 
+// validateAuthToken rejects tokens that can never be presented by a client.
+// RFC 6750's b64token grammar has no whitespace, and HTTP header values
+// cannot carry control characters, so a token containing either (typically a
+// trailing newline from a secret file created with `echo`) would silently
+// lock every caller out with 401. Surrounding whitespace is trimmed at load
+// time; anything left over is a configuration error. The token itself is
+// never included in the message.
+func validateAuthToken(token string) error {
+	if i := strings.IndexFunc(token, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }); i >= 0 {
+		return fmt.Errorf("auth token contains whitespace or a control character at byte offset %d; bearer tokens cannot include these (check for a trailing newline in the secret source)", i)
+	}
+	return nil
+}
+
 // AuthEnabled reports whether bearer-token authentication is configured.
 func (s *ServerConfig) AuthEnabled() bool {
 	return s.AuthToken != ""
@@ -246,6 +261,10 @@ func (c *Config) Validate() error {
 
 	if c.Server.TransportMode != TransportHTTP && c.Server.TransportMode != TransportStdio {
 		return fmt.Errorf("transport mode must be either '%s' or '%s'", TransportHTTP, TransportStdio)
+	}
+
+	if err := validateAuthToken(c.Server.AuthToken); err != nil {
+		return err
 	}
 
 	if c.Server.UnauthenticatedNonLoopback() && !c.Server.AllowUnauthenticated {
@@ -290,7 +309,7 @@ func FromEnv(config *Config) {
 		config.Server.TransportMode = val
 	}
 
-	if val := os.Getenv("MCP_CRON_SERVER_AUTH_TOKEN"); val != "" {
+	if val := strings.TrimSpace(os.Getenv("MCP_CRON_SERVER_AUTH_TOKEN")); val != "" {
 		config.Server.AuthToken = val
 	}
 
