@@ -235,6 +235,17 @@ func TestValidateAuth(t *testing.T) {
 	}
 }
 
+func TestFromEnvPreventSleep(t *testing.T) {
+	for val, want := range map[string]bool{"true": true, "1": true, "TRUE": true, "0": false, "false": false} {
+		t.Setenv("MCP_CRON_PREVENT_SLEEP", val)
+		cfg := DefaultConfig()
+		FromEnv(cfg)
+		if cfg.PreventSleep != want {
+			t.Errorf("MCP_CRON_PREVENT_SLEEP=%q: got %v, want %v", val, cfg.PreventSleep, want)
+		}
+	}
+}
+
 func TestFromEnvAuth(t *testing.T) {
 	t.Setenv("MCP_CRON_SERVER_AUTH_TOKEN", "env-secret")
 	t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", "TRUE")
@@ -252,6 +263,25 @@ func TestFromEnvAuth(t *testing.T) {
 	FromEnv(cfg)
 	if cfg.Server.AllowUnauthenticated {
 		t.Error("Expected AllowUnauthenticated false for 'false'")
+	}
+
+	// strconv.ParseBool forms are accepted, not just the literal "true"
+	for val, want := range map[string]bool{"1": true, "t": true, "True": true, "0": false, "f": false, "FALSE": false} {
+		t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", val)
+		cfg = DefaultConfig()
+		FromEnv(cfg)
+		if cfg.Server.AllowUnauthenticated != want {
+			t.Errorf("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=%q: got %v, want %v", val, cfg.Server.AllowUnauthenticated, want)
+		}
+	}
+
+	// An unparseable value is ignored (leaves the prior value), not treated as false
+	t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", "yes")
+	cfg = DefaultConfig()
+	cfg.Server.AllowUnauthenticated = true
+	FromEnv(cfg)
+	if !cfg.Server.AllowUnauthenticated {
+		t.Error("Expected unparseable MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=yes to be ignored, but it was applied as false")
 	}
 
 	// Surrounding whitespace (e.g. a trailing newline from `echo` into a

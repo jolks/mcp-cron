@@ -189,7 +189,7 @@ The following environment variables are supported:
 | `MCP_CRON_SERVER_PORT` | The port to bind the server to | `8080` |
 | `MCP_CRON_SERVER_TRANSPORT` | Transport mode: `http` or `stdio` | `http` |
 | `MCP_CRON_SERVER_AUTH_TOKEN` | Bearer token required for HTTP transport requests | Not set |
-| `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED` | Allow HTTP transport on a non-loopback address without an auth token (dangerous) | `false` |
+| `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED` | Allow HTTP transport on a non-loopback address without an auth token (dangerous). Accepts `true`/`false`/`1`/`0` (case-insensitive) | `false` |
 | `MCP_CRON_SERVER_NAME` | **Deprecated** — ignored; the server name is fixed to ensure self-reference detection works correctly | - |
 | `MCP_CRON_SERVER_VERSION` | **Deprecated** — ignored; version is set at build time via ldflags | - |
 | `MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT` | Default timeout for task execution | `10m` |
@@ -205,7 +205,7 @@ The following environment variables are supported:
 | `MCP_CRON_AI_MAX_TOOL_ITERATIONS` | Maximum iterations for tool-enabled tasks | `20` |
 | `MCP_CRON_MCP_CONFIG_FILE_PATH` | Path to MCP configuration file | `~/.cursor/mcp.json` |
 | `MCP_CRON_STORE_DB_PATH` | Path to SQLite database for result history | `~/.mcp-cron/results.db` |
-| `MCP_CRON_PREVENT_SLEEP` | Prevent system from sleeping while mcp-cron is running (macOS and Windows) | `false` |
+| `MCP_CRON_PREVENT_SLEEP` | Prevent system from sleeping while mcp-cron is running (macOS and Windows). Accepts `true`/`false`/`1`/`0` (case-insensitive) | `false` |
 | `MCP_CRON_POLL_INTERVAL` | How often to check for due tasks (Go duration format) | `1s` |
 
 ### Authentication

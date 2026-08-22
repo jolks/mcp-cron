@@ -313,8 +313,8 @@ func FromEnv(config *Config) {
 		config.Server.AuthToken = val
 	}
 
-	if val := os.Getenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED"); val != "" {
-		config.Server.AllowUnauthenticated = strings.ToLower(val) == "true"
+	if val, ok := envBool("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED"); ok {
+		config.Server.AllowUnauthenticated = val
 	}
 
 	if os.Getenv("MCP_CRON_SERVER_NAME") != "" {
@@ -387,7 +387,26 @@ func FromEnv(config *Config) {
 		config.AI.MCPConfigFilePath = val
 	}
 
-	if val := os.Getenv("MCP_CRON_PREVENT_SLEEP"); val != "" {
-		config.PreventSleep = strings.ToLower(val) == "true"
+	if val, ok := envBool("MCP_CRON_PREVENT_SLEEP"); ok {
+		config.PreventSleep = val
 	}
+}
+
+// envBool reads a boolean environment variable using strconv.ParseBool
+// semantics (1, t, true, 0, f, false — case-insensitive). It returns ok=false
+// when the variable is unset or empty. A value that does not parse is logged
+// and ignored rather than silently treated as false, so that a typo in a
+// security-sensitive opt-in such as MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED is
+// visible instead of producing a confusing downstream error.
+func envBool(name string) (value, ok bool) {
+	val := strings.TrimSpace(os.Getenv(name))
+	if val == "" {
+		return false, false
+	}
+	b, err := strconv.ParseBool(val)
+	if err != nil {
+		log.Printf("WARN: ignoring %s=%q: expected a boolean (true/false/1/0)", name, val)
+		return false, false
+	}
+	return b, true
 }
