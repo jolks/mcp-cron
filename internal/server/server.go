@@ -146,7 +146,7 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 	case config.TransportStdio:
 		logger.Infof("Using stdio transport")
 	case config.TransportHTTP:
-		logger.Infof("Using Streamable HTTP transport on %s:%d", cfg.Server.Address, cfg.Server.Port)
+		logger.Infof("Using Streamable HTTP transport on %s", config.JoinHostPort(cfg.Server.Address, cfg.Server.Port))
 	default:
 		return nil, errors.InvalidInput(fmt.Sprintf("unsupported transport mode: %s", cfg.Server.TransportMode))
 	}
@@ -197,7 +197,7 @@ func (s *MCPServer) Start(ctx context.Context) error {
 			close(s.stopCh)
 		}()
 	case config.TransportHTTP:
-		addr := fmt.Sprintf("%s:%d", s.address, s.port)
+		addr := config.JoinHostPort(s.address, s.port)
 		var handler http.Handler = mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 			return s.server
 		}, nil)

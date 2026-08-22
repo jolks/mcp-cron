@@ -2,6 +2,7 @@
 package config
 
 import (
+	"net"
 	"os"
 	"path/filepath"
 	"testing"
@@ -130,9 +131,15 @@ func TestIsLoopbackAddress(t *testing.T) {
 		{"127.0.0.1", true},
 		{"127.0.0.2", true},
 		{"::1", true},
+		{"[::1]", true},
+		{"::1%lo0", true},
+		{"[::1%lo0]", true},
+		{"[127.0.0.1]", true},
 		{"", false},
 		{"0.0.0.0", false},
 		{"::", false},
+		{"[::]", false},
+		{"[", false},
 		{"192.168.1.5", false},
 		{"example.com", false},
 	}
@@ -141,6 +148,35 @@ func TestIsLoopbackAddress(t *testing.T) {
 			t.Errorf("IsLoopbackAddress(%q) = %v, want %v", tt.addr, got, tt.want)
 		}
 	}
+}
+
+func TestJoinHostPort(t *testing.T) {
+	tests := []struct {
+		host string
+		port int
+		want string
+	}{
+		{"localhost", 8080, "localhost:8080"},
+		{"127.0.0.1", 8080, "127.0.0.1:8080"},
+		{"::1", 8080, "[::1]:8080"},
+		{"[::1]", 8080, "[::1]:8080"},
+		{"::1%lo0", 8080, "[::1%lo0]:8080"},
+		{"0.0.0.0", 8080, "0.0.0.0:8080"},
+		{"", 8080, ":8080"},
+	}
+	for _, tt := range tests {
+		if got := JoinHostPort(tt.host, tt.port); got != tt.want {
+			t.Errorf("JoinHostPort(%q, %d) = %q, want %q", tt.host, tt.port, got, tt.want)
+		}
+	}
+
+	// The IPv6 form must actually be listenable: this is the regression
+	// ("::1:8080" → "too many colons") that bracketing fixes.
+	ln, err := net.Listen("tcp", JoinHostPort("::1", 0))
+	if err != nil {
+		t.Skipf("IPv6 loopback unavailable on this host: %v", err)
+	}
+	_ = ln.Close()
 }
 
 func TestValidateAuth(t *testing.T) {

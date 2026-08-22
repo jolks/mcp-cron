@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"net/netip"
 	"net/url"
 	"os"
 	"path/filepath"
@@ -203,14 +204,25 @@ func DefaultConfig() *Config {
 }
 
 // IsLoopbackAddress reports whether addr only binds loopback interfaces.
-// The empty string (all interfaces) and unparseable hostnames are treated
-// as non-loopback (fail closed).
+// It accepts "localhost" (case-insensitive) and any loopback IP literal,
+// including bracketed ("[::1]") and zoned ("::1%lo0") IPv6 forms — the same
+// rule the go-sdk applies for its own localhost protection. The empty string
+// (all interfaces) and unparseable hostnames are treated as non-loopback
+// (fail closed).
 func IsLoopbackAddress(addr string) bool {
-	if strings.EqualFold(addr, "localhost") {
+	host := strings.Trim(addr, "[]")
+	if strings.EqualFold(host, "localhost") {
 		return true
 	}
-	ip := net.ParseIP(addr)
-	return ip != nil && ip.IsLoopback()
+	ip, err := netip.ParseAddr(host)
+	return err == nil && ip.IsLoopback()
+}
+
+// JoinHostPort builds a listen address from a configured host and port,
+// bracketing IPv6 literals so that "::1" becomes "[::1]:8080" (which
+// net.Listen requires) while already-bracketed input is not double-wrapped.
+func JoinHostPort(host string, port int) string {
+	return net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port))
 }
 
 // AuthEnabled reports whether bearer-token authentication is configured.
