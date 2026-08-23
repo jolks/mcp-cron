@@ -280,8 +280,9 @@ func (s *MCPServer) Stop() error {
 	return nil
 }
 
-// ListenAddr returns the address the HTTP transport is bound to, or nil if
-// the server is not serving HTTP. Useful when the configured port is 0.
+// ListenAddr returns the address the HTTP transport is bound to. It is nil
+// in stdio mode and until Start() has successfully bound the socket, so
+// tests that pass port 0 can discover the chosen port.
 func (s *MCPServer) ListenAddr() net.Addr {
 	if s.listener == nil {
 		return nil

@@ -104,8 +104,9 @@ type ServerConfig struct {
 	// Transport mode (http, stdio)
 	TransportMode string
 
-	// AuthToken, when set, requires HTTP requests to carry
-	// an "Authorization: Bearer <token>" header
+	// AuthToken, when set, requires every HTTP-transport request to carry an
+	// "Authorization: Bearer <token>" header. Populate it via SetAuthToken so
+	// whitespace trimming is applied; ignored in stdio mode.
 	AuthToken string
 
 	// AllowUnauthenticated permits serving HTTP on a non-loopback
@@ -205,11 +206,12 @@ func DefaultConfig() *Config {
 }
 
 // IsLoopbackAddress reports whether addr only binds loopback interfaces.
-// It accepts "localhost" (case-insensitive) and any loopback IP literal,
-// including bracketed ("[::1]") and zoned ("::1%lo0") IPv6 forms — the same
-// rule the go-sdk applies for its own localhost protection. The empty string
-// (all interfaces) and unparseable hostnames are treated as non-loopback
-// (fail closed).
+// It accepts "localhost" (any letter case) and any loopback IP literal,
+// including bracketed ("[::1]") and zoned ("::1%lo0") IPv6 forms, modelled
+// on the rule the go-sdk applies for its own localhost protection.
+// Hostnames are never resolved: anything other than "localhost" — including
+// names that happen to resolve to 127.0.0.1 — and the empty string (all
+// interfaces) are treated as non-loopback, so the check fails closed.
 func IsLoopbackAddress(addr string) bool {
 	host := hostLiteral(addr)
 	if strings.EqualFold(host, "localhost") {
@@ -219,8 +221,10 @@ func IsLoopbackAddress(addr string) bool {
 	return err == nil && ip.IsLoopback()
 }
 
-// hostLiteral strips the optional IPv6 brackets from a configured address so
-// that "[::1]" and "::1" are treated identically.
+// hostLiteral removes any leading/trailing square brackets from a configured
+// address so that "[::1]" and "::1" are treated identically. Unbalanced
+// brackets are removed too; whatever remains is judged by IsLoopbackAddress,
+// which fails closed.
 func hostLiteral(addr string) string {
 	return strings.Trim(addr, "[]")
 }
@@ -242,12 +246,12 @@ func (s *ServerConfig) SetAuthToken(raw string) {
 	}
 }
 
-// validateAuthToken rejects tokens that can never be presented by a client.
-// RFC 6750's b64token grammar has no whitespace, and HTTP header values
-// cannot carry control characters, so a token containing either would
-// silently lock every caller out with 401. SetAuthToken trims the edges;
-// anything left over is a configuration error. The token itself is never
-// included in the message.
+// validateAuthToken rejects tokens that no HTTP request could ever present:
+// whitespace (not allowed inside a bearer token) or control characters (not
+// allowed in a header value). Such a token would silently 401 every caller.
+// Nothing else is enforced — arbitrary printable characters are fine.
+// SetAuthToken trims the edges; anything left over is a configuration
+// error. The error never includes the token.
 func (s *ServerConfig) validateAuthToken() error {
 	if i := strings.IndexFunc(s.AuthToken, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }); i >= 0 {
 		return fmt.Errorf("auth token contains whitespace or a control character at byte offset %d; bearer tokens cannot include these (check for a trailing newline in the secret source)", i)
@@ -269,8 +273,9 @@ func (s *ServerConfig) UnauthenticatedNonLoopback() bool {
 // CheckAuthPolicy enforces the fail-closed rule: serving the HTTP transport
 // on a non-loopback address without a token is refused unless the operator
 // explicitly opted in with AllowUnauthenticated. It is the single definition
-// of that rule, called from both Validate() (CLI entry point) and
-// MCPServer.Start() (the layer that opens the socket).
+// of that rule, called from Validate() (run by the CLI before anything
+// starts) and again from server.MCPServer.Start() (the layer that actually
+// opens the socket, which library callers may reach without Validate).
 func (s *ServerConfig) CheckAuthPolicy() error {
 	if s.UnauthenticatedNonLoopback() && !s.AllowUnauthenticated {
 		return fmt.Errorf("refusing to serve http on non-loopback address %q without authentication: set --auth-token (or MCP_CRON_SERVER_AUTH_TOKEN), or pass --allow-unauthenticated to accept the risk", s.Address)
@@ -408,12 +413,13 @@ func FromEnv(config *Config) {
 	}
 }
 
-// envParse reads a non-string environment variable through parse (e.g.
-// strconv.Atoi, strconv.ParseBool, time.ParseDuration). It returns ok=false
-// when the variable is unset or blank. A value that does not parse is logged
-// and ignored rather than silently dropped, so a typo — especially in a
-// security-sensitive opt-in such as MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED —
-// is visible instead of surfacing as a confusing downstream error.
+// envParse reads an environment variable that needs parsing (via e.g.
+// strconv.Atoi, strconv.ParseBool, time.ParseDuration). Surrounding
+// whitespace is trimmed; ok is false when the variable is unset or blank.
+// A value that fails to parse is logged and ignored rather than silently
+// dropped, so a typo — especially in a security-sensitive opt-in such as
+// MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED — is visible instead of surfacing
+// as a confusing downstream error.
 func envParse[T any](name string, parse func(string) (T, error)) (value T, ok bool) {
 	val := strings.TrimSpace(os.Getenv(name))
 	if val == "" {

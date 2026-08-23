@@ -30,8 +30,9 @@ var reservedHeaders = map[string]bool{
 }
 
 // sanitizeHeaders canonicalizes configured header names and drops the
-// reserved ones, returning the dropped names so the caller can warn once.
-// Doing this at construction keeps RoundTrip a plain copy loop.
+// reserved ones. It returns the dropped names so the caller can log them
+// once at load time rather than on every request, which also keeps
+// RoundTrip a plain copy loop.
 func sanitizeHeaders(in map[string]string) (clean map[string]string, dropped []string) {
 	clean = make(map[string]string, len(in))
 	for k, v := range in {
@@ -45,21 +46,17 @@ func sanitizeHeaders(in map[string]string) (clean map[string]string, dropped []s
 	return clean, dropped
 }
 
-// headerRoundTripper injects static headers (e.g. an Authorization bearer
-// token) into every request to an HTTP MCP server, and refuses to send them
-// anywhere else.
+// headerRoundTripper adds static headers (e.g. an Authorization bearer
+// token) to every request to one HTTP MCP server, and refuses any request
+// to a different origin so those headers can never leak via a redirect.
 //
-// It sits *below* http.Client's redirect logic, so the stdlib's protection —
-// stripping Authorization when a redirect crosses to another host — would be
-// undone: the client strips the header, then this transport adds it back on
-// the redirected request. The transport therefore pins itself to the
-// configured origin (scheme, host, port) and fails any request to a
-// different one before dialing, with a single exception: a same-host
-// http→https upgrade on default ports. That is the policy httpx (Python MCP
-// SDK) applies and the outcome fetch (TypeScript MCP SDK) produces by
-// dropping Authorization on cross-origin redirects. Keeping the check inside
-// the type that holds the secrets means it cannot be lost by pairing the
-// transport with a different http.Client.
+// Why the check lives here: a RoundTripper runs below http.Client's
+// redirect handling, so the stdlib's own safeguard (dropping Authorization
+// on a cross-host redirect) would be undone when we re-add the header.
+// Pinning to the configured origin (scheme, host, port) — with the single
+// exception of a same-host http→https upgrade on the default ports 80→443,
+// matching httpx in the Python SDK — keeps the secret where it was
+// configured.
 type headerRoundTripper struct {
 	base    http.RoundTripper
 	origin  *url.URL
@@ -79,8 +76,9 @@ func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	return h.base.RoundTrip(req)
 }
 
-// newHeaderInjectingClient builds the HTTP client for an MCP server at
-// endpoint that needs the given (already sanitized) static headers.
+// newHeaderInjectingClient returns an http.Client whose transport adds
+// headers (already passed through sanitizeHeaders) to every request and
+// refuses requests outside endpoint's origin; see headerRoundTripper.
 func newHeaderInjectingClient(endpoint string, headers map[string]string) (*http.Client, error) {
 	origin, err := url.Parse(endpoint)
 	if err != nil {
@@ -107,6 +105,9 @@ func sameOriginOrHTTPSUpgrade(from, to *url.URL) bool {
 	return from.Scheme == "http" && to.Scheme == "https" && fromPort == "80" && toPort == "443"
 }
 
+// effectivePort returns u's explicit port, or the default for its scheme
+// ("80"/"443"); "" for any other scheme, which then never matches an
+// http→https upgrade.
 func effectivePort(u *url.URL) string {
 	if p := u.Port(); p != "" {
 		return p

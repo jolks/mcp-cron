@@ -40,7 +40,7 @@ var (
 	mcpConfigPath   = flag.String("mcp-config-path", "", "Path to MCP configuration file (default: ~/.cursor/mcp.json)")
 	dbPath          = flag.String("db-path", "", "Path to SQLite database for result history (default: ~/.mcp-cron/results.db)")
 	preventSleep    = flag.Bool("prevent-sleep", false, "Prevent system from sleeping while mcp-cron is running (macOS and Windows only)")
-	pollInterval    = flag.Duration("poll-interval", time.Second, "How often to check for due tasks")
+	pollInterval    = flag.Duration("poll-interval", 0, "How often to check for due tasks (default: 1s)")
 )
 
 func main() {

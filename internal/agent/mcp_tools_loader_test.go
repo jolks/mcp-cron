@@ -267,9 +267,9 @@ func TestHeaderRoundTripperDoesNotMutateOriginal(t *testing.T) {
 	}
 }
 
-// TestSanitizeHeaders: headers the transport derives from connection state
-// must not be configurable from mcp.json; everything else (including
-// Authorization) is kept, with canonical names.
+// TestSanitizeHeaders verifies that headers the transport derives from
+// connection state cannot be set from mcp.json, while everything else
+// (including Authorization) is kept under its canonical name.
 func TestSanitizeHeaders(t *testing.T) {
 	clean, dropped := sanitizeHeaders(map[string]string{
 		"authorization":        "Bearer secret",
