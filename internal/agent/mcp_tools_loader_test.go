@@ -488,7 +488,6 @@ func TestHelperProcess(t *testing.T) {
 func TestEnvPassedToCommand(t *testing.T) {
 	tempDir := t.TempDir()
 
-
 	// Config that spawns this test binary as an MCP server subprocess,
 	// passing env vars through the config's env field.
 	envConfig := fmt.Sprintf(`{
@@ -598,8 +597,6 @@ func TestNonSelfServerNotSkipped(t *testing.T) {
 		t.Errorf("Expected 1 tool named 'some_tool', got %d tools", len(resp.Tools))
 	}
 }
-
-
 
 // TestHeaderRoundTripperDoesNotOverrideTransportHeaders: headers the SDK has
 // already set on the request (Accept, Content-Type, ...) must win over a

@@ -212,7 +212,7 @@ Boolean variables accept the forms understood by Go's `strconv.ParseBool`: `1`, 
 
 ### Configuration Precedence
 
-Defaults are overridden by environment variables, which are overridden by command-line flags that are explicitly set. Boolean flags (`--allow-unauthenticated`, `--prevent-sleep`) can only turn a setting on: passing `--allow-unauthenticated=false` does not override `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=true`, and `--auth-token ""` does not clear `MCP_CRON_SERVER_AUTH_TOKEN`. To disable a setting that is enabled in the environment, unset the variable.
+Defaults are overridden by environment variables, which are overridden by command-line flags that are explicitly passed — so `--allow-unauthenticated=false` does override `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=true`. `mcp-cron -h` shows the effective default for each flag, including values taken from the environment. The one exception is `--auth-token`: a blank value does not clear `MCP_CRON_SERVER_AUTH_TOKEN` (the token is deliberately never used as a flag default, so it cannot appear in `-h` output); unset the variable instead.
 
 ### Authentication
 
