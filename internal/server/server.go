@@ -187,6 +187,9 @@ func (s *MCPServer) Start(ctx context.Context) error {
 
 	switch s.config.Server.TransportMode {
 	case config.TransportStdio:
+		if s.config.Server.AuthEnabled() {
+			s.logger.Warnf("An auth token is configured but the stdio transport has no HTTP authentication; it is ignored")
+		}
 		runCtx, cancel := context.WithCancel(ctx)
 		s.cancel = cancel
 		s.wg.Add(1)

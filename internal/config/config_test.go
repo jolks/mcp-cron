@@ -120,6 +120,32 @@ func TestValidate(t *testing.T) {
 	if err := invalidMaxIterations.Validate(); err == nil {
 		t.Error("Expected error for zero max tool iterations, got nil")
 	}
+
+	// Non-positive poll interval would panic time.NewTicker at run time
+	for _, pi := range []time.Duration{0, -time.Second} {
+		invalidPoll := DefaultConfig()
+		invalidPoll.Scheduler.PollInterval = pi
+		if err := invalidPoll.Validate(); err == nil {
+			t.Errorf("Expected error for poll interval %v, got nil", pi)
+		}
+	}
+
+	// Address must be a host only; the port is a separate setting
+	for _, addr := range []string{"127.0.0.1:9000", "[::1]:9000", "localhost:9000"} {
+		withPort := DefaultConfig()
+		withPort.Server.Address = addr
+		err := withPort.Validate()
+		if err == nil || !strings.Contains(err.Error(), "must not include a port") {
+			t.Errorf("Expected embedded-port error for address %q, got %v", addr, err)
+		}
+	}
+	// ...but only for HTTP, where the address is used
+	stdioWithPort := DefaultConfig()
+	stdioWithPort.Server.TransportMode = TransportStdio
+	stdioWithPort.Server.Address = "127.0.0.1:9000"
+	if err := stdioWithPort.Validate(); err != nil {
+		t.Errorf("Expected no address error in stdio mode, got %v", err)
+	}
 }
 
 func TestIsLoopbackAddress(t *testing.T) {
@@ -128,7 +154,7 @@ func TestIsLoopbackAddress(t *testing.T) {
 		want bool
 	}{
 		{"localhost", true},
-		{"LOCALHOST", true},
+		{"LOCALHOST", false}, // go-sdk's Host-header check is case-sensitive; accepting it here would 403 every request
 		{"127.0.0.1", true},
 		{"127.0.0.2", true},
 		{"::1", true},
@@ -196,6 +222,8 @@ func TestValidateAuth(t *testing.T) {
 		{"token with trailing newline", func(s *ServerConfig) { s.AuthToken = "secret\n" }, true},
 		{"token with tab", func(s *ServerConfig) { s.AuthToken = "\tsecret" }, true},
 		{"token with control char", func(s *ServerConfig) { s.AuthToken = "sec\x00ret" }, true},
+		// The token is ignored by the stdio transport, so its format is not checked there
+		{"stdio ignores a malformed token", func(s *ServerConfig) { s.TransportMode = TransportStdio; s.AuthToken = "sec ret" }, false},
 		// Ordinary tokens, including ones outside the b64token alphabet, are fine
 		{"plain token", func(s *ServerConfig) { s.AuthToken = "secret" }, false},
 		{"b64token alphabet", func(s *ServerConfig) { s.AuthToken = "s3cr3t-token_with.dots~and+slashes/==" }, false},

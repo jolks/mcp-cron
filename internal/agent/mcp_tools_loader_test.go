@@ -600,3 +600,35 @@ func TestNonSelfServerNotSkipped(t *testing.T) {
 }
 
 
+
+// TestHeaderRoundTripperDoesNotOverrideTransportHeaders: headers the SDK has
+// already set on the request (Accept, Content-Type, ...) must win over a
+// configured value, while absent ones are filled in.
+func TestHeaderRoundTripperDoesNotOverrideTransportHeaders(t *testing.T) {
+	base, seen := recordingTransport()
+	clean, _ := sanitizeHeaders(map[string]string{
+		"Authorization": "Bearer secret",
+		"accept":        "text/event-stream",
+		"Content-Type":  "text/plain",
+	})
+	rt := &headerRoundTripper{base: base, origin: mustURL(t, "http://example.com/"), headers: clean}
+
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/", nil)
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if got := seen.Get("Accept"); got != "application/json, text/event-stream" {
+		t.Errorf("Accept = %q, want the transport's value to win", got)
+	}
+	if got := seen.Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want the transport's value to win", got)
+	}
+	if got := seen.Get("Authorization"); got != "Bearer secret" {
+		t.Errorf("Authorization = %q, want injected value", got)
+	}
+}

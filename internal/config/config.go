@@ -206,15 +206,18 @@ func DefaultConfig() *Config {
 }
 
 // IsLoopbackAddress reports whether addr only binds loopback interfaces.
-// It accepts "localhost" (any letter case) and any loopback IP literal,
-// including bracketed ("[::1]") and zoned ("::1%lo0") IPv6 forms, modelled
-// on the rule the go-sdk applies for its own localhost protection.
-// Hostnames are never resolved: anything other than "localhost" — including
-// names that happen to resolve to 127.0.0.1 — and the empty string (all
-// interfaces) are treated as non-loopback, so the check fails closed.
+// It accepts the exact literal "localhost" and any loopback IP literal,
+// including bracketed ("[::1]") and zoned ("::1%lo0") IPv6 forms — the same
+// rule the go-sdk applies to the Host header for its DNS-rebinding
+// protection. The match is deliberately case-sensitive: the SDK's check is,
+// so "LOCALHOST" would pass here and then be refused with 403 on every
+// request. Hostnames are never resolved: anything other than "localhost" —
+// including names that happen to resolve to 127.0.0.1 — and the empty
+// string (all interfaces) are treated as non-loopback, so the check fails
+// closed.
 func IsLoopbackAddress(addr string) bool {
 	host := hostLiteral(addr)
-	if strings.EqualFold(host, "localhost") {
+	if host == "localhost" {
 		return true
 	}
 	ip, err := netip.ParseAddr(host)
@@ -270,13 +273,23 @@ func (s *ServerConfig) UnauthenticatedNonLoopback() bool {
 	return s.TransportMode == TransportHTTP && !s.AuthEnabled() && !IsLoopbackAddress(s.Address)
 }
 
-// CheckAuthPolicy enforces the fail-closed rule: serving the HTTP transport
-// on a non-loopback address without a token is refused unless the operator
-// explicitly opted in with AllowUnauthenticated. It is the single definition
-// of that rule, called from Validate() (run by the CLI before anything
-// starts) and again from server.MCPServer.Start() (the layer that actually
-// opens the socket, which library callers may reach without Validate).
+// CheckAuthPolicy is the single definition of the HTTP-transport auth rules,
+// called from Validate() (run by the CLI before anything starts) and again
+// from server.MCPServer.Start() (the layer that actually opens the socket,
+// which library callers may reach without Validate). It is a no-op for the
+// stdio transport, where the token is ignored. For HTTP it checks that
+//
+//   - a configured token is one a client can actually present (see
+//     validateAuthToken), and
+//   - a non-loopback bind without a token was explicitly opted into with
+//     AllowUnauthenticated (the fail-closed rule).
 func (s *ServerConfig) CheckAuthPolicy() error {
+	if s.TransportMode != TransportHTTP {
+		return nil
+	}
+	if err := s.validateAuthToken(); err != nil {
+		return err
+	}
 	if s.UnauthenticatedNonLoopback() && !s.AllowUnauthenticated {
 		return fmt.Errorf("refusing to serve http on non-loopback address %q without authentication: set --auth-token (or MCP_CRON_SERVER_AUTH_TOKEN), or pass --allow-unauthenticated to accept the risk", s.Address)
 	}
@@ -294,8 +307,13 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("transport mode must be either '%s' or '%s'", TransportHTTP, TransportStdio)
 	}
 
-	if err := c.Server.validateAuthToken(); err != nil {
-		return err
+	// The address is a host only; the port has its own setting. An embedded
+	// port would otherwise be misread as a non-loopback hostname and steer
+	// the user toward --allow-unauthenticated.
+	if c.Server.TransportMode == TransportHTTP {
+		if _, _, err := net.SplitHostPort(c.Server.Address); err == nil {
+			return fmt.Errorf("server address %q must not include a port; set the port with --port (or MCP_CRON_SERVER_PORT)", c.Server.Address)
+		}
 	}
 
 	if err := c.Server.CheckAuthPolicy(); err != nil {
@@ -305,6 +323,11 @@ func (c *Config) Validate() error {
 	// Validate scheduler config
 	if c.Scheduler.DefaultTimeout < time.Second {
 		return fmt.Errorf("default timeout must be at least 1 second")
+	}
+
+	// time.NewTicker panics on a non-positive interval
+	if c.Scheduler.PollInterval <= 0 {
+		return fmt.Errorf("poll interval must be positive")
 	}
 
 	// Validate logging config

@@ -129,3 +129,23 @@ func TestHTTPTransportLoopbackWithoutToken(t *testing.T) {
 		t.Fatalf("status = %d, want 200 for loopback without token", resp.StatusCode)
 	}
 }
+
+// TestStartRefusesMalformedToken proves the token-format rule is enforced by
+// the server itself: a token no client could present must not produce a
+// server that starts cleanly and 401s everyone.
+func TestStartRefusesMalformedToken(t *testing.T) {
+	srv := newHTTPTestServer(t, func(cfg *config.Config) {
+		cfg.Server.AuthToken = "abc def"
+	})
+	err := srv.Start(context.Background())
+	if err == nil {
+		_ = srv.Stop()
+		t.Fatal("expected Start to refuse a token containing whitespace, got nil")
+	}
+	if !strings.Contains(err.Error(), "auth token") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if srv.ListenAddr() != nil {
+		t.Error("server must not bind a socket when refusing to start")
+	}
+}

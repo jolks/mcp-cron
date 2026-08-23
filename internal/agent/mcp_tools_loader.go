@@ -18,12 +18,14 @@ import (
 
 type toolCaller func(context.Context, ToolCall) (string, error)
 
-// reservedHeaders are derived from connection state by the go-sdk on every
-// request and must never be overridden by a static value from mcp.json; a
-// stale session id or protocol version would make the server reject the
-// request. This mirrors the TypeScript SDK's RESERVED_REQUEST_HEADER_NAMES.
-// Everything else — including Authorization, Accept and Content-Type — is
-// left to the user, consistent with the TypeScript and Python SDKs.
+// reservedHeaders are derived from connection state by the go-sdk and are
+// absent on the very first request (initialize), so a static value from
+// mcp.json would be injected there and make the server reject the session.
+// They are dropped at load time. Headers the SDK sets on every request
+// (Accept, Content-Type, Last-Event-ID, ...) need no listing: RoundTrip only
+// fills in headers that are still absent, so the transport's values always
+// win — the precedence the TypeScript SDK applies as well (it merges the
+// user's Accept into its own and forces Content-Type).
 var reservedHeaders = map[string]bool{
 	"Mcp-Session-Id":       true,
 	"Mcp-Protocol-Version": true,
@@ -47,8 +49,10 @@ func sanitizeHeaders(in map[string]string) (clean map[string]string, dropped []s
 }
 
 // headerRoundTripper adds static headers (e.g. an Authorization bearer
-// token) to every request to one HTTP MCP server, and refuses any request
-// to a different origin so those headers can never leak via a redirect.
+// token) to every request to one HTTP MCP server — only where the request
+// does not already carry that header, so protocol headers the SDK sets per
+// request cannot be clobbered — and refuses any request to a different
+// origin so those headers can never leak via a redirect.
 //
 // Why the check lives here: a RoundTripper runs below http.Client's
 // redirect handling, so the stdlib's own safeguard (dropping Authorization
@@ -70,8 +74,10 @@ func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error
 	}
 	// Clone per the RoundTripper contract: the original request must not be mutated
 	req = req.Clone(req.Context())
-	for k, v := range h.headers {
-		req.Header.Set(k, v)
+	for k, v := range h.headers { // keys are canonical, so direct map lookup is exact
+		if _, set := req.Header[k]; !set {
+			req.Header.Set(k, v)
+		}
 	}
 	return h.base.RoundTrip(req)
 }
