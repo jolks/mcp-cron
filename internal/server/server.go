@@ -148,7 +148,7 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 	case config.TransportStdio:
 		logger.Infof("Using stdio transport")
 	case config.TransportHTTP:
-		logger.Infof("Using Streamable HTTP transport on %s", config.JoinHostPort(cfg.Server.Address, cfg.Server.Port))
+		logger.Infof("Using Streamable HTTP transport on %s", cfg.Server.ListenAddr())
 	default:
 		return nil, errors.InvalidInput(fmt.Sprintf("unsupported transport mode: %s", cfg.Server.TransportMode))
 	}
@@ -199,15 +199,13 @@ func (s *MCPServer) Start(ctx context.Context) error {
 			close(s.stopCh)
 		}()
 	case config.TransportHTTP:
-		addr := config.JoinHostPort(s.address, s.port)
 		// Enforce the fail-closed rule here as well as in config.Validate():
 		// this is the layer that opens the socket, and Validate() only runs
-		// from the CLI entry point. Exposing the task tools (arbitrary shell
-		// execution) unauthenticated on a network interface must be an
-		// explicit opt-in no matter how the server was constructed.
-		if s.config.Server.UnauthenticatedNonLoopback() && !s.config.Server.AllowUnauthenticated {
-			return fmt.Errorf("refusing to serve http on non-loopback address %q without authentication: set an auth token, or explicitly allow unauthenticated access", s.address)
+		// from the CLI entry point.
+		if err := s.config.Server.CheckAuthPolicy(); err != nil {
+			return err
 		}
+		addr := s.config.Server.ListenAddr()
 		var handler http.Handler = mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 			return s.server
 		}, nil)
@@ -224,7 +222,7 @@ func (s *MCPServer) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to listen on %s: %w", addr, err)
 		}
 		s.listener = ln
-		s.httpServer = &http.Server{Addr: addr, Handler: handler}
+		s.httpServer = &http.Server{Handler: handler}
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()

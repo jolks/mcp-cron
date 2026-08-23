@@ -211,7 +211,7 @@ func DefaultConfig() *Config {
 // (all interfaces) and unparseable hostnames are treated as non-loopback
 // (fail closed).
 func IsLoopbackAddress(addr string) bool {
-	host := strings.Trim(addr, "[]")
+	host := hostLiteral(addr)
 	if strings.EqualFold(host, "localhost") {
 		return true
 	}
@@ -219,22 +219,37 @@ func IsLoopbackAddress(addr string) bool {
 	return err == nil && ip.IsLoopback()
 }
 
-// JoinHostPort builds a listen address from a configured host and port,
-// bracketing IPv6 literals so that "::1" becomes "[::1]:8080" (which
-// net.Listen requires) while already-bracketed input is not double-wrapped.
-func JoinHostPort(host string, port int) string {
-	return net.JoinHostPort(strings.Trim(host, "[]"), strconv.Itoa(port))
+// hostLiteral strips the optional IPv6 brackets from a configured address so
+// that "[::1]" and "::1" are treated identically.
+func hostLiteral(addr string) string {
+	return strings.Trim(addr, "[]")
+}
+
+// ListenAddr returns the address the HTTP transport should bind, bracketing
+// IPv6 literals so that "::1" becomes "[::1]:8080" (which net.Listen requires)
+// without double-wrapping already-bracketed input.
+func (s *ServerConfig) ListenAddr() string {
+	return net.JoinHostPort(hostLiteral(s.Address), strconv.Itoa(s.Port))
+}
+
+// SetAuthToken applies a token from any source (env var, flag), trimming
+// surrounding whitespace — typically a trailing newline from a secret file
+// created with `echo` — and treating a blank value as "not set" so it does
+// not clear a token supplied elsewhere.
+func (s *ServerConfig) SetAuthToken(raw string) {
+	if token := strings.TrimSpace(raw); token != "" {
+		s.AuthToken = token
+	}
 }
 
 // validateAuthToken rejects tokens that can never be presented by a client.
 // RFC 6750's b64token grammar has no whitespace, and HTTP header values
-// cannot carry control characters, so a token containing either (typically a
-// trailing newline from a secret file created with `echo`) would silently
-// lock every caller out with 401. Surrounding whitespace is trimmed at load
-// time; anything left over is a configuration error. The token itself is
-// never included in the message.
-func validateAuthToken(token string) error {
-	if i := strings.IndexFunc(token, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }); i >= 0 {
+// cannot carry control characters, so a token containing either would
+// silently lock every caller out with 401. SetAuthToken trims the edges;
+// anything left over is a configuration error. The token itself is never
+// included in the message.
+func (s *ServerConfig) validateAuthToken() error {
+	if i := strings.IndexFunc(s.AuthToken, func(r rune) bool { return unicode.IsSpace(r) || unicode.IsControl(r) }); i >= 0 {
 		return fmt.Errorf("auth token contains whitespace or a control character at byte offset %d; bearer tokens cannot include these (check for a trailing newline in the secret source)", i)
 	}
 	return nil
@@ -247,9 +262,20 @@ func (s *ServerConfig) AuthEnabled() bool {
 
 // UnauthenticatedNonLoopback reports whether this configuration would serve
 // the HTTP transport on a non-loopback address without authentication.
-// Validate refuses such configs unless AllowUnauthenticated is set.
 func (s *ServerConfig) UnauthenticatedNonLoopback() bool {
 	return s.TransportMode == TransportHTTP && !s.AuthEnabled() && !IsLoopbackAddress(s.Address)
+}
+
+// CheckAuthPolicy enforces the fail-closed rule: serving the HTTP transport
+// on a non-loopback address without a token is refused unless the operator
+// explicitly opted in with AllowUnauthenticated. It is the single definition
+// of that rule, called from both Validate() (CLI entry point) and
+// MCPServer.Start() (the layer that opens the socket).
+func (s *ServerConfig) CheckAuthPolicy() error {
+	if s.UnauthenticatedNonLoopback() && !s.AllowUnauthenticated {
+		return fmt.Errorf("refusing to serve http on non-loopback address %q without authentication: set --auth-token (or MCP_CRON_SERVER_AUTH_TOKEN), or pass --allow-unauthenticated to accept the risk", s.Address)
+	}
+	return nil
 }
 
 // Validate checks if the configuration is valid
@@ -263,12 +289,12 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("transport mode must be either '%s' or '%s'", TransportHTTP, TransportStdio)
 	}
 
-	if err := validateAuthToken(c.Server.AuthToken); err != nil {
+	if err := c.Server.validateAuthToken(); err != nil {
 		return err
 	}
 
-	if c.Server.UnauthenticatedNonLoopback() && !c.Server.AllowUnauthenticated {
-		return fmt.Errorf("refusing to serve http on non-loopback address %q without authentication: set --auth-token (or MCP_CRON_SERVER_AUTH_TOKEN), or pass --allow-unauthenticated to accept the risk", c.Server.Address)
+	if err := c.Server.CheckAuthPolicy(); err != nil {
+		return err
 	}
 
 	// Validate scheduler config
@@ -299,21 +325,17 @@ func FromEnv(config *Config) {
 		config.Server.Address = val
 	}
 
-	if val := os.Getenv("MCP_CRON_SERVER_PORT"); val != "" {
-		if port, err := strconv.Atoi(val); err == nil {
-			config.Server.Port = port
-		}
+	if port, ok := envParse("MCP_CRON_SERVER_PORT", strconv.Atoi); ok {
+		config.Server.Port = port
 	}
 
 	if val := os.Getenv("MCP_CRON_SERVER_TRANSPORT"); val != "" {
 		config.Server.TransportMode = val
 	}
 
-	if val := strings.TrimSpace(os.Getenv("MCP_CRON_SERVER_AUTH_TOKEN")); val != "" {
-		config.Server.AuthToken = val
-	}
+	config.Server.SetAuthToken(os.Getenv("MCP_CRON_SERVER_AUTH_TOKEN"))
 
-	if val, ok := envBool("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED"); ok {
+	if val, ok := envParse("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", strconv.ParseBool); ok {
 		config.Server.AllowUnauthenticated = val
 	}
 
@@ -326,16 +348,12 @@ func FromEnv(config *Config) {
 	}
 
 	// Scheduler configuration
-	if val := os.Getenv("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT"); val != "" {
-		if duration, err := time.ParseDuration(val); err == nil {
-			config.Scheduler.DefaultTimeout = duration
-		}
+	if duration, ok := envParse("MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT", time.ParseDuration); ok {
+		config.Scheduler.DefaultTimeout = duration
 	}
 
-	if val := os.Getenv("MCP_CRON_POLL_INTERVAL"); val != "" {
-		if duration, err := time.ParseDuration(val); err == nil {
-			config.Scheduler.PollInterval = duration
-		}
+	if duration, ok := envParse("MCP_CRON_POLL_INTERVAL", time.ParseDuration); ok {
+		config.Scheduler.PollInterval = duration
 	}
 
 	// Logging configuration
@@ -377,36 +395,34 @@ func FromEnv(config *Config) {
 		config.AI.Model = val
 	}
 
-	if val := os.Getenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS"); val != "" {
-		if iterations, err := strconv.Atoi(val); err == nil {
-			config.AI.MaxToolIterations = iterations
-		}
+	if iterations, ok := envParse("MCP_CRON_AI_MAX_TOOL_ITERATIONS", strconv.Atoi); ok {
+		config.AI.MaxToolIterations = iterations
 	}
 
 	if val := os.Getenv("MCP_CRON_MCP_CONFIG_FILE_PATH"); val != "" {
 		config.AI.MCPConfigFilePath = val
 	}
 
-	if val, ok := envBool("MCP_CRON_PREVENT_SLEEP"); ok {
+	if val, ok := envParse("MCP_CRON_PREVENT_SLEEP", strconv.ParseBool); ok {
 		config.PreventSleep = val
 	}
 }
 
-// envBool reads a boolean environment variable using strconv.ParseBool
-// semantics (1, t, true, 0, f, false — case-insensitive). It returns ok=false
-// when the variable is unset or empty. A value that does not parse is logged
-// and ignored rather than silently treated as false, so that a typo in a
-// security-sensitive opt-in such as MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED is
-// visible instead of producing a confusing downstream error.
-func envBool(name string) (value, ok bool) {
+// envParse reads a non-string environment variable through parse (e.g.
+// strconv.Atoi, strconv.ParseBool, time.ParseDuration). It returns ok=false
+// when the variable is unset or blank. A value that does not parse is logged
+// and ignored rather than silently dropped, so a typo — especially in a
+// security-sensitive opt-in such as MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED —
+// is visible instead of surfacing as a confusing downstream error.
+func envParse[T any](name string, parse func(string) (T, error)) (value T, ok bool) {
 	val := strings.TrimSpace(os.Getenv(name))
 	if val == "" {
-		return false, false
+		return value, false
 	}
-	b, err := strconv.ParseBool(val)
+	parsed, err := parse(val)
 	if err != nil {
-		log.Printf("WARN: ignoring %s=%q: expected a boolean (true/false/1/0)", name, val)
-		return false, false
+		log.Printf("WARN: ignoring %s=%q: %v", name, val, err)
+		return value, false
 	}
-	return b, true
+	return parsed, true
 }

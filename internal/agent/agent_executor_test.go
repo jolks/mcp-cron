@@ -543,7 +543,7 @@ func TestRunTaskIntegrationListTools(t *testing.T) {
 			cfg.AI.MCPConfigFilePath = writeTestMCPConfig(t, ts.URL)
 
 			// Verify tools load from the test server
-			tools, _, closeFn, err := buildToolsFromConfig(cfg)
+			tools, _, closeFn, err := buildToolsFromConfig(cfg, testLogger())
 			if closeFn != nil {
 				defer closeFn()
 			}

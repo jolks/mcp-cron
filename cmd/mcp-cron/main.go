@@ -8,7 +8,6 @@ import (
 	"log"
 	"os"
 	"os/signal"
-	"strings"
 	"syscall"
 	"time"
 
@@ -117,9 +116,7 @@ func applyCommandLineFlagsToConfig(cfg *config.Config) {
 	if *transport != "" {
 		cfg.Server.TransportMode = *transport
 	}
-	if token := strings.TrimSpace(*authToken); token != "" {
-		cfg.Server.AuthToken = token
-	}
+	cfg.Server.SetAuthToken(*authToken)
 	if *allowUnauth {
 		cfg.Server.AllowUnauthenticated = true
 	}

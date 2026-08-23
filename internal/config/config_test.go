@@ -151,7 +151,7 @@ func TestIsLoopbackAddress(t *testing.T) {
 	}
 }
 
-func TestJoinHostPort(t *testing.T) {
+func TestListenAddr(t *testing.T) {
 	tests := []struct {
 		host string
 		port int
@@ -166,14 +166,15 @@ func TestJoinHostPort(t *testing.T) {
 		{"", 8080, ":8080"},
 	}
 	for _, tt := range tests {
-		if got := JoinHostPort(tt.host, tt.port); got != tt.want {
-			t.Errorf("JoinHostPort(%q, %d) = %q, want %q", tt.host, tt.port, got, tt.want)
+		s := ServerConfig{Address: tt.host, Port: tt.port}
+		if got := s.ListenAddr(); got != tt.want {
+			t.Errorf("ListenAddr(%q, %d) = %q, want %q", tt.host, tt.port, got, tt.want)
 		}
 	}
 
 	// The IPv6 form must actually be listenable: this is the regression
 	// ("::1:8080" → "too many colons") that bracketing fixes.
-	ln, err := net.Listen("tcp", JoinHostPort("::1", 0))
+	ln, err := net.Listen("tcp", (&ServerConfig{Address: "::1"}).ListenAddr())
 	if err != nil {
 		t.Skipf("IPv6 loopback unavailable on this host: %v", err)
 	}
@@ -181,57 +182,54 @@ func TestJoinHostPort(t *testing.T) {
 }
 
 func TestValidateAuth(t *testing.T) {
-	// HTTP on non-loopback without token must fail
-	noToken := DefaultConfig()
-	noToken.Server.Address = "0.0.0.0"
-	if err := noToken.Validate(); err == nil {
-		t.Error("Expected error for http on non-loopback address without auth token, got nil")
+	cases := []struct {
+		name    string
+		mutate  func(*ServerConfig)
+		wantErr bool
+	}{
+		{"http non-loopback without token", func(s *ServerConfig) { s.Address = "0.0.0.0" }, true},
+		{"http non-loopback with token", func(s *ServerConfig) { s.Address = "0.0.0.0"; s.AuthToken = "secret" }, false},
+		{"http non-loopback with explicit override", func(s *ServerConfig) { s.Address = "0.0.0.0"; s.AllowUnauthenticated = true }, false},
+		{"stdio is unaffected by the address", func(s *ServerConfig) { s.TransportMode = TransportStdio; s.Address = "0.0.0.0" }, false},
+		// Tokens that can never match an HTTP request are rejected at startup
+		{"token with internal space", func(s *ServerConfig) { s.AuthToken = "sec ret" }, true},
+		{"token with trailing newline", func(s *ServerConfig) { s.AuthToken = "secret\n" }, true},
+		{"token with tab", func(s *ServerConfig) { s.AuthToken = "\tsecret" }, true},
+		{"token with control char", func(s *ServerConfig) { s.AuthToken = "sec\x00ret" }, true},
+		// Ordinary tokens, including ones outside the b64token alphabet, are fine
+		{"plain token", func(s *ServerConfig) { s.AuthToken = "secret" }, false},
+		{"b64token alphabet", func(s *ServerConfig) { s.AuthToken = "s3cr3t-token_with.dots~and+slashes/==" }, false},
+		{"punctuation token", func(s *ServerConfig) { s.AuthToken = "p@ss:w0rd!" }, false},
 	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			tc.mutate(&cfg.Server)
+			err := cfg.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected no error, got: %v", err)
+			}
+			if err != nil && cfg.Server.AuthToken != "" && strings.Contains(err.Error(), cfg.Server.AuthToken) {
+				t.Errorf("validation error must not echo the token; got %q", err)
+			}
+		})
+	}
+}
 
-	// Same address with a token is valid
-	withToken := DefaultConfig()
-	withToken.Server.Address = "0.0.0.0"
-	withToken.Server.AuthToken = "secret"
-	if err := withToken.Validate(); err != nil {
-		t.Errorf("Expected no error with auth token set, got: %v", err)
-	}
-
-	// Same address with explicit override is valid
-	withOverride := DefaultConfig()
-	withOverride.Server.Address = "0.0.0.0"
-	withOverride.Server.AllowUnauthenticated = true
-	if err := withOverride.Validate(); err != nil {
-		t.Errorf("Expected no error with AllowUnauthenticated, got: %v", err)
-	}
-
-	// Stdio mode is unaffected by the address
-	stdio := DefaultConfig()
-	stdio.Server.TransportMode = TransportStdio
-	stdio.Server.Address = "0.0.0.0"
-	if err := stdio.Validate(); err != nil {
-		t.Errorf("Expected no error for stdio mode on non-loopback address, got: %v", err)
-	}
-
-	// Tokens that can never match an HTTP request are rejected at startup
-	for _, bad := range []string{"sec ret", "secret\n", "secret\t", "\tsecret", "sec\x00ret"} {
-		cfg := DefaultConfig()
-		cfg.Server.AuthToken = bad
-		err := cfg.Validate()
-		if err == nil {
-			t.Errorf("Expected error for auth token %q containing whitespace/control char, got nil", bad)
-			continue
-		}
-		if strings.Contains(err.Error(), bad) {
-			t.Errorf("Validation error must not echo the token; got %q", err)
-		}
-	}
-	// Ordinary tokens, including ones outside the b64token alphabet, are fine
-	for _, ok := range []string{"secret", "s3cr3t-token_with.dots~and+slashes/==", "p@ss:w0rd!"} {
-		cfg := DefaultConfig()
-		cfg.Server.AuthToken = ok
-		if err := cfg.Validate(); err != nil {
-			t.Errorf("Expected no error for auth token %q, got: %v", ok, err)
-		}
+func TestFromEnvIgnoresUnparseable(t *testing.T) {
+	// Every non-string env var goes through envParse: a bad value is logged
+	// and ignored, leaving the prior value in place.
+	t.Setenv("MCP_CRON_SERVER_PORT", "eighty")
+	t.Setenv("MCP_CRON_POLL_INTERVAL", "1sec")
+	t.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "many")
+	cfg := DefaultConfig()
+	want := *cfg
+	FromEnv(cfg)
+	if cfg.Server.Port != want.Server.Port || cfg.Scheduler.PollInterval != want.Scheduler.PollInterval || cfg.AI.MaxToolIterations != want.AI.MaxToolIterations {
+		t.Errorf("unparseable env values were applied: port=%d poll=%v iterations=%d", cfg.Server.Port, cfg.Scheduler.PollInterval, cfg.AI.MaxToolIterations)
 	}
 }
 
@@ -248,25 +246,14 @@ func TestFromEnvPreventSleep(t *testing.T) {
 
 func TestFromEnvAuth(t *testing.T) {
 	t.Setenv("MCP_CRON_SERVER_AUTH_TOKEN", "env-secret")
-	t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", "TRUE")
 	cfg := DefaultConfig()
 	FromEnv(cfg)
 	if cfg.Server.AuthToken != "env-secret" {
 		t.Errorf("Expected auth token 'env-secret', got '%s'", cfg.Server.AuthToken)
 	}
-	if !cfg.Server.AllowUnauthenticated {
-		t.Error("Expected AllowUnauthenticated true for 'TRUE'")
-	}
-
-	t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", "false")
-	cfg = DefaultConfig()
-	FromEnv(cfg)
-	if cfg.Server.AllowUnauthenticated {
-		t.Error("Expected AllowUnauthenticated false for 'false'")
-	}
 
 	// strconv.ParseBool forms are accepted, not just the literal "true"
-	for val, want := range map[string]bool{"1": true, "t": true, "True": true, "0": false, "f": false, "FALSE": false} {
+	for val, want := range map[string]bool{"TRUE": true, "1": true, "t": true, "True": true, "false": false, "0": false, "f": false, "FALSE": false} {
 		t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", val)
 		cfg = DefaultConfig()
 		FromEnv(cfg)

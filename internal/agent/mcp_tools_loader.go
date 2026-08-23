@@ -29,83 +29,89 @@ var reservedHeaders = map[string]bool{
 	"Mcp-Protocol-Version": true,
 }
 
-// isReservedHeader reports whether a user-configured header name is one the
-// transport owns.
-func isReservedHeader(name string) bool {
-	return reservedHeaders[http.CanonicalHeaderKey(name)]
+// sanitizeHeaders canonicalizes configured header names and drops the
+// reserved ones, returning the dropped names so the caller can warn once.
+// Doing this at construction keeps RoundTrip a plain copy loop.
+func sanitizeHeaders(in map[string]string) (clean map[string]string, dropped []string) {
+	clean = make(map[string]string, len(in))
+	for k, v := range in {
+		canonical := http.CanonicalHeaderKey(k)
+		if reservedHeaders[canonical] {
+			dropped = append(dropped, k)
+			continue
+		}
+		clean[canonical] = v
+	}
+	return clean, dropped
 }
 
 // headerRoundTripper injects static headers (e.g. an Authorization bearer
-// token) into every request, for HTTP MCP servers that require auth.
+// token) into every request to an HTTP MCP server, and refuses to send them
+// anywhere else.
+//
+// It sits *below* http.Client's redirect logic, so the stdlib's protection —
+// stripping Authorization when a redirect crosses to another host — would be
+// undone: the client strips the header, then this transport adds it back on
+// the redirected request. The transport therefore pins itself to the
+// configured origin (scheme, host, port) and fails any request to a
+// different one before dialing, with a single exception: a same-host
+// http→https upgrade on default ports. That is the policy httpx (Python MCP
+// SDK) applies and the outcome fetch (TypeScript MCP SDK) produces by
+// dropping Authorization on cross-origin redirects. Keeping the check inside
+// the type that holds the secrets means it cannot be lost by pairing the
+// transport with a different http.Client.
 type headerRoundTripper struct {
 	base    http.RoundTripper
-	headers map[string]string
+	origin  *url.URL
+	headers map[string]string // canonical keys, reserved names removed
 }
 
 func (h *headerRoundTripper) RoundTrip(req *http.Request) (*http.Response, error) {
+	if !sameOriginOrHTTPSUpgrade(h.origin, req.URL) {
+		return nil, fmt.Errorf("refusing redirect from %s://%s to %s://%s: configured headers would be sent to a different origin",
+			h.origin.Scheme, h.origin.Host, req.URL.Scheme, req.URL.Host)
+	}
 	// Clone per the RoundTripper contract: the original request must not be mutated
 	req = req.Clone(req.Context())
 	for k, v := range h.headers {
-		if isReservedHeader(k) {
-			continue
-		}
 		req.Header.Set(k, v)
 	}
 	return h.base.RoundTrip(req)
 }
 
-// maxRedirects mirrors net/http's default redirect limit.
-const maxRedirects = 10
-
-// newHeaderInjectingClient builds the HTTP client used for MCP servers that
-// need static headers. Because headerRoundTripper injects headers *below*
-// http.Client's redirect logic, the stdlib's protection — stripping
-// Authorization when a redirect crosses to another host — would be undone:
-// the client strips the header, then the round tripper adds it back on the
-// redirected request. To keep credentials from ever reaching an origin the
-// user did not configure, redirects are only followed when they stay on the
-// original origin (scheme, host, port), with one exception: a same-host
-// http→https upgrade on default ports. This is the same policy as httpx
-// (Python MCP SDK) and matches fetch (TypeScript MCP SDK), which drop
-// Authorization on any cross-origin redirect.
-func newHeaderInjectingClient(headers map[string]string) *http.Client {
-	return &http.Client{
-		Transport:     &headerRoundTripper{base: http.DefaultTransport, headers: headers},
-		CheckRedirect: refuseCrossOriginRedirect,
+// newHeaderInjectingClient builds the HTTP client for an MCP server at
+// endpoint that needs the given (already sanitized) static headers.
+func newHeaderInjectingClient(endpoint string, headers map[string]string) (*http.Client, error) {
+	origin, err := url.Parse(endpoint)
+	if err != nil {
+		return nil, err
 	}
+	return &http.Client{Transport: &headerRoundTripper{
+		base:    http.DefaultTransport,
+		origin:  origin,
+		headers: headers,
+	}}, nil
 }
 
-// refuseCrossOriginRedirect is an http.Client.CheckRedirect policy that allows
-// same-origin redirects (plus http→https upgrades) and rejects any other hop.
-func refuseCrossOriginRedirect(req *http.Request, via []*http.Request) error {
-	if len(via) >= maxRedirects {
-		return fmt.Errorf("stopped after %d redirects", maxRedirects)
-	}
-	origin := via[0].URL
-	if !sameOriginOrHTTPSUpgrade(origin, req.URL) {
-		return fmt.Errorf("refusing redirect from %s://%s to %s://%s: configured headers would be sent to a different origin",
-			origin.Scheme, origin.Host, req.URL.Scheme, req.URL.Host)
-	}
-	return nil
-}
-
+// sameOriginOrHTTPSUpgrade reports whether to is the same origin as from, or
+// a same-host http→https upgrade on default ports. url.Parse already
+// lowercases the scheme, so only the host needs case folding.
 func sameOriginOrHTTPSUpgrade(from, to *url.URL) bool {
 	if !strings.EqualFold(from.Hostname(), to.Hostname()) {
 		return false
 	}
-	fromScheme, toScheme := strings.ToLower(from.Scheme), strings.ToLower(to.Scheme)
 	fromPort, toPort := effectivePort(from), effectivePort(to)
-	if fromScheme == toScheme {
+	if from.Scheme == to.Scheme {
 		return fromPort == toPort
 	}
-	return fromScheme == "http" && toScheme == "https" && fromPort == "80" && toPort == "443"
+	return from.Scheme == "http" && to.Scheme == "https" && fromPort == "80" && toPort == "443"
 }
 
 func effectivePort(u *url.URL) string {
 	if p := u.Port(); p != "" {
 		return p
 	}
-	switch strings.ToLower(u.Scheme) {
+	switch u.Scheme {
 	case "http":
 		return "80"
 	case "https":
@@ -114,7 +120,7 @@ func effectivePort(u *url.URL) string {
 	return ""
 }
 
-func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, func(), error) {
+func buildToolsFromConfig(sysCfg *config.Config, logger *logging.Logger) ([]ToolDefinition, toolCaller, func(), error) {
 	var cfg struct {
 		MCP map[string]struct {
 			Command string            `json:"command,omitempty"`
@@ -131,8 +137,6 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 	if err = json.Unmarshal(raw, &cfg); err != nil {
 		return nil, nil, nil, err
 	}
-
-	logger := logging.GetDefaultLogger()
 
 	// Create a go-sdk client per server and collect its tools
 	var tools []ToolDefinition
@@ -156,12 +160,16 @@ func buildToolsFromConfig(sysCfg *config.Config) ([]ToolDefinition, toolCaller, 
 		case spec.URL != "":
 			st := &mcp.StreamableClientTransport{Endpoint: spec.URL}
 			if len(spec.Headers) > 0 {
-				for k := range spec.Headers {
-					if isReservedHeader(k) {
-						logger.Warnf("MCP server %q: ignoring configured header %q; it is set per request by the transport", name, k)
-					}
+				headers, dropped := sanitizeHeaders(spec.Headers)
+				for _, k := range dropped {
+					logger.Warnf("MCP server %q: ignoring configured header %q; it is set per request by the transport", name, k)
 				}
-				st.HTTPClient = newHeaderInjectingClient(spec.Headers)
+				client, err := newHeaderInjectingClient(spec.URL, headers)
+				if err != nil {
+					logger.Warnf("MCP server %q: invalid url %q: %v", name, spec.URL, err)
+					continue
+				}
+				st.HTTPClient = client
 			}
 			tp = st
 		default:
