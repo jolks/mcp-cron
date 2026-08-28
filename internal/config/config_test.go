@@ -146,6 +146,35 @@ func TestValidate(t *testing.T) {
 	if err := stdioWithPort.Validate(); err != nil {
 		t.Errorf("Expected no address error in stdio mode, got %v", err)
 	}
+
+	// Flags are bound directly to config fields, so an explicit empty value
+	// reaches Validate; required settings must reject it instead of silently
+	// misbehaving (--address "" would bind every interface, --db-path ""
+	// opens a throwaway temp database).
+	empties := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{"empty address in http mode", func(c *Config) { c.Server.Address = "" }},
+		{"empty db path", func(c *Config) { c.Store.DBPath = "" }},
+		{"empty AI model", func(c *Config) { c.AI.Model = "" }},
+		{"empty MCP config path", func(c *Config) { c.AI.MCPConfigFilePath = "" }},
+	}
+	for _, tc := range empties {
+		cfg := DefaultConfig()
+		cfg.Server.AuthToken = "secret" // isolate the emptiness check from the loopback rule
+		tc.mutate(cfg)
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%s: expected validation error, got nil", tc.name)
+		}
+	}
+	// An empty address is fine in stdio mode, where it is unused
+	stdioEmpty := DefaultConfig()
+	stdioEmpty.Server.TransportMode = TransportStdio
+	stdioEmpty.Server.Address = ""
+	if err := stdioEmpty.Validate(); err != nil {
+		t.Errorf("Expected no error for empty address in stdio mode, got %v", err)
+	}
 }
 
 func TestIsLoopbackAddress(t *testing.T) {
@@ -258,6 +287,25 @@ func TestFromEnvIgnoresUnparseable(t *testing.T) {
 	FromEnv(cfg)
 	if cfg.Server.Port != want.Server.Port || cfg.Scheduler.PollInterval != want.Scheduler.PollInterval || cfg.AI.MaxToolIterations != want.AI.MaxToolIterations {
 		t.Errorf("unparseable env values were applied: port=%d poll=%v iterations=%d", cfg.Server.Port, cfg.Scheduler.PollInterval, cfg.AI.MaxToolIterations)
+	}
+}
+
+func TestFromEnvTrimsStrings(t *testing.T) {
+	// A trailing newline from command substitution must not make a loopback
+	// address look non-loopback (which would suggest --allow-unauthenticated)
+	t.Setenv("MCP_CRON_SERVER_ADDRESS", " 127.0.0.1\n")
+	t.Setenv("MCP_CRON_AI_MODEL", "gpt-4o \n")
+	t.Setenv("MCP_CRON_LOGGING_LEVEL", "  ") // blank means unset
+	cfg := DefaultConfig()
+	FromEnv(cfg)
+	if cfg.Server.Address != "127.0.0.1" {
+		t.Errorf("Expected trimmed address, got %q", cfg.Server.Address)
+	}
+	if cfg.AI.Model != "gpt-4o" {
+		t.Errorf("Expected trimmed model, got %q", cfg.AI.Model)
+	}
+	if cfg.Logging.Level != "info" {
+		t.Errorf("Expected blank env to keep default log level, got %q", cfg.Logging.Level)
 	}
 }
 

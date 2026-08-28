@@ -212,7 +212,7 @@ Boolean variables accept the forms understood by Go's `strconv.ParseBool`: `1`, 
 
 ### Configuration Precedence
 
-Defaults are overridden by environment variables, which are overridden by command-line flags that are explicitly passed — so `--allow-unauthenticated=false` does override `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=true`. `mcp-cron -h` shows the effective default for each flag, including values taken from the environment. The one exception is `--auth-token`: a blank value does not clear `MCP_CRON_SERVER_AUTH_TOKEN` (the token is deliberately never used as a flag default, so it cannot appear in `-h` output); unset the variable instead.
+Defaults are overridden by environment variables, which are overridden by command-line flags that are explicitly passed — so `--allow-unauthenticated=false` does override `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=true`. `mcp-cron -h` shows the effective default for each flag, including values taken from the environment. The one exception is `--auth-token`: a blank value does not clear `MCP_CRON_SERVER_AUTH_TOKEN` (the token is deliberately never used as a flag default, so it cannot appear in `-h` output); unset the variable instead. Explicitly blanking a required setting (`--address ""` in HTTP mode, `--db-path ""`, `--ai-model ""`, `--mcp-config-path ""`) is rejected at startup rather than silently misbehaving. String environment variables are trimmed of surrounding whitespace; a blank value counts as unset.
 
 ### Authentication
 

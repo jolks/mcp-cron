@@ -149,3 +149,20 @@ func TestStartRefusesMalformedToken(t *testing.T) {
 		t.Error("server must not bind a socket when refusing to start")
 	}
 }
+
+// TestStartRefusesAddressWithPort proves the host-only address rule is
+// enforced at the socket layer, like the rest of CheckAuthPolicy.
+func TestStartRefusesAddressWithPort(t *testing.T) {
+	srv := newHTTPTestServer(t, func(cfg *config.Config) {
+		cfg.Server.Address = "localhost:9000"
+		cfg.Server.AuthToken = "s3cret"
+	})
+	err := srv.Start(context.Background())
+	if err == nil {
+		_ = srv.Stop()
+		t.Fatal("expected Start to refuse an address with an embedded port, got nil")
+	}
+	if !strings.Contains(err.Error(), "must not include a port") {
+		t.Errorf("unexpected error: %v", err)
+	}
+}

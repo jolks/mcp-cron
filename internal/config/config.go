@@ -287,6 +287,15 @@ func (s *ServerConfig) CheckAuthPolicy() error {
 	if s.TransportMode != TransportHTTP {
 		return nil
 	}
+	// The address must be a plain host: an explicitly empty value would bind
+	// every interface, and an embedded port would be misread as a
+	// non-loopback hostname and steer the user toward --allow-unauthenticated.
+	if s.Address == "" {
+		return fmt.Errorf("server address must not be empty in http mode (the default is \"localhost\")")
+	}
+	if _, _, err := net.SplitHostPort(s.Address); err == nil {
+		return fmt.Errorf("server address %q must not include a port; set the port with --port (or MCP_CRON_SERVER_PORT)", s.Address)
+	}
 	if err := s.validateAuthToken(); err != nil {
 		return err
 	}
@@ -305,15 +314,6 @@ func (c *Config) Validate() error {
 
 	if c.Server.TransportMode != TransportHTTP && c.Server.TransportMode != TransportStdio {
 		return fmt.Errorf("transport mode must be either '%s' or '%s'", TransportHTTP, TransportStdio)
-	}
-
-	// The address is a host only; the port has its own setting. An embedded
-	// port would otherwise be misread as a non-loopback hostname and steer
-	// the user toward --allow-unauthenticated.
-	if c.Server.TransportMode == TransportHTTP {
-		if _, _, err := net.SplitHostPort(c.Server.Address); err == nil {
-			return fmt.Errorf("server address %q must not include a port; set the port with --port (or MCP_CRON_SERVER_PORT)", c.Server.Address)
-		}
 	}
 
 	if err := c.Server.CheckAuthPolicy(); err != nil {
@@ -338,9 +338,24 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("log level must be one of: debug, info, warn, error, fatal")
 	}
 
+	// Validate store config. Flags are bound directly to these fields, so an
+	// explicit --db-path "" would otherwise slip through and open a private
+	// temporary database that vanishes on exit.
+	if c.Store.DBPath == "" {
+		return fmt.Errorf("db path must not be empty")
+	}
+
 	// Validate AI config
 	if c.AI.MaxToolIterations < 1 {
 		return fmt.Errorf("max tool iterations must be at least 1")
+	}
+
+	if c.AI.Model == "" {
+		return fmt.Errorf("AI model must not be empty")
+	}
+
+	if c.AI.MCPConfigFilePath == "" {
+		return fmt.Errorf("MCP config file path must not be empty")
 	}
 
 	return nil
@@ -349,7 +364,7 @@ func (c *Config) Validate() error {
 // FromEnv loads configuration from environment variables
 func FromEnv(config *Config) {
 	// Server configuration
-	if val := os.Getenv("MCP_CRON_SERVER_ADDRESS"); val != "" {
+	if val, ok := envString("MCP_CRON_SERVER_ADDRESS"); ok {
 		config.Server.Address = val
 	}
 
@@ -357,7 +372,7 @@ func FromEnv(config *Config) {
 		config.Server.Port = port
 	}
 
-	if val := os.Getenv("MCP_CRON_SERVER_TRANSPORT"); val != "" {
+	if val, ok := envString("MCP_CRON_SERVER_TRANSPORT"); ok {
 		config.Server.TransportMode = val
 	}
 
@@ -385,41 +400,41 @@ func FromEnv(config *Config) {
 	}
 
 	// Logging configuration
-	if val := os.Getenv("MCP_CRON_LOGGING_LEVEL"); val != "" {
+	if val, ok := envString("MCP_CRON_LOGGING_LEVEL"); ok {
 		config.Logging.Level = val
 	}
 
-	if val := os.Getenv("MCP_CRON_LOGGING_FILE"); val != "" {
+	if val, ok := envString("MCP_CRON_LOGGING_FILE"); ok {
 		config.Logging.FilePath = val
 	}
 
 	// Store configuration
-	if val := os.Getenv("MCP_CRON_STORE_DB_PATH"); val != "" {
+	if val, ok := envString("MCP_CRON_STORE_DB_PATH"); ok {
 		config.Store.DBPath = val
 	}
 
 	// AI configuration
-	if val := os.Getenv("MCP_CRON_AI_PROVIDER"); val != "" {
+	if val, ok := envString("MCP_CRON_AI_PROVIDER"); ok {
 		config.AI.Provider = val
 	}
 
-	if val := os.Getenv("MCP_CRON_AI_BASE_URL"); val != "" {
+	if val, ok := envString("MCP_CRON_AI_BASE_URL"); ok {
 		config.AI.BaseURL = val
 	}
 
-	if val := os.Getenv("MCP_CRON_AI_API_KEY"); val != "" {
+	if val, ok := envString("MCP_CRON_AI_API_KEY"); ok {
 		config.AI.APIKey = val
 	}
 
-	if val := os.Getenv("OPENAI_API_KEY"); val != "" {
+	if val, ok := envString("OPENAI_API_KEY"); ok {
 		config.AI.OpenAIAPIKey = val
 	}
 
-	if val := os.Getenv("ANTHROPIC_API_KEY"); val != "" {
+	if val, ok := envString("ANTHROPIC_API_KEY"); ok {
 		config.AI.AnthropicAPIKey = val
 	}
 
-	if val := os.Getenv("MCP_CRON_AI_MODEL"); val != "" {
+	if val, ok := envString("MCP_CRON_AI_MODEL"); ok {
 		config.AI.Model = val
 	}
 
@@ -427,13 +442,23 @@ func FromEnv(config *Config) {
 		config.AI.MaxToolIterations = iterations
 	}
 
-	if val := os.Getenv("MCP_CRON_MCP_CONFIG_FILE_PATH"); val != "" {
+	if val, ok := envString("MCP_CRON_MCP_CONFIG_FILE_PATH"); ok {
 		config.AI.MCPConfigFilePath = val
 	}
 
 	if val, ok := envParse("MCP_CRON_PREVENT_SLEEP", strconv.ParseBool); ok {
 		config.PreventSleep = val
 	}
+}
+
+// envString reads a string environment variable, trimming surrounding
+// whitespace — a trailing newline from command substitution or a secret file
+// is a common source, and an untrimmed address would flip the loopback check.
+// ok is false when the variable is unset or blank, so a blank value never
+// overwrites a default.
+func envString(name string) (value string, ok bool) {
+	value = strings.TrimSpace(os.Getenv(name))
+	return value, value != ""
 }
 
 // envParse reads an environment variable that needs parsing (via e.g.
