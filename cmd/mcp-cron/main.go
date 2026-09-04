@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -81,19 +82,21 @@ func loadConfig() *config.Config {
 // --allow-unauthenticated=false), there is a single source of defaults, and
 // -h shows the effective values.
 //
-// --auth-token is the one exception: it is parsed into a local and applied
-// via SetAuthToken so that the env-supplied token never appears as a flag
-// default in -h output. Consequently `--auth-token ""` does not clear an
-// env token; unset the variable instead.
+// --auth-token is registered with fs.Func rather than a StringVar bound to
+// the field: a Func flag has no printable default, so the env-supplied
+// token can never appear in -h output, while an explicitly passed value —
+// including "" — still overrides the environment like every other flag.
 func parseConfig(fs *flag.FlagSet, args []string) (cfg *config.Config, showVersion bool) {
 	cfg = config.DefaultConfig()
 	config.FromEnv(cfg)
 
-	var authToken string
 	fs.StringVar(&cfg.Server.Address, "address", cfg.Server.Address, "The address to bind the server to (host only; see --port)")
 	fs.IntVar(&cfg.Server.Port, "port", cfg.Server.Port, "The port to bind the server to")
 	fs.StringVar(&cfg.Server.TransportMode, "transport", cfg.Server.TransportMode, "Transport mode: http or stdio")
-	fs.StringVar(&authToken, "auth-token", "", "Bearer token required for HTTP transport requests (prefer MCP_CRON_SERVER_AUTH_TOKEN to keep it out of process listings)")
+	fs.Func("auth-token", "Bearer token required for HTTP transport requests (prefer MCP_CRON_SERVER_AUTH_TOKEN to keep it out of process listings)", func(v string) error {
+		cfg.Server.AuthToken = strings.TrimSpace(v)
+		return nil
+	})
 	fs.BoolVar(&cfg.Server.AllowUnauthenticated, "allow-unauthenticated", cfg.Server.AllowUnauthenticated, "Allow HTTP transport on a non-loopback address without an auth token (dangerous)")
 	fs.StringVar(&cfg.Logging.Level, "log-level", cfg.Logging.Level, "Logging level: debug, info, warn, error, fatal")
 	fs.StringVar(&cfg.Logging.FilePath, "log-file", cfg.Logging.FilePath, "Log file path (default: stdout)")
@@ -107,8 +110,6 @@ func parseConfig(fs *flag.FlagSet, args []string) (cfg *config.Config, showVersi
 	fs.BoolVar(&cfg.PreventSleep, "prevent-sleep", cfg.PreventSleep, "Prevent system from sleeping while mcp-cron is running (macOS and Windows only)")
 	fs.DurationVar(&cfg.Scheduler.PollInterval, "poll-interval", cfg.Scheduler.PollInterval, "How often to check for due tasks")
 	_ = fs.Parse(args) // flag.CommandLine exits on error; a ContinueOnError set (tests) reports via the config
-
-	cfg.Server.SetAuthToken(authToken)
 	return cfg, showVersion
 }
 

@@ -59,13 +59,9 @@ func TestNewMCPServer(t *testing.T) {
 		return
 	}
 
-	// Check values directly
-	if server.address != "localhost" {
-		t.Errorf("Expected address localhost, got %s", server.address)
-	}
-
-	if server.port != 8080 {
-		t.Errorf("Expected port 8080, got %d", server.port)
+	// Check the resolved listen address
+	if got := server.config.Server.ListenAddr(); got != "localhost:8080" {
+		t.Errorf("Expected listen address localhost:8080, got %s", got)
 	}
 }
 
@@ -90,12 +86,8 @@ func TestNewMCPServerWithCustomConfig(t *testing.T) {
 		t.Fatalf("Failed to create server with custom config: %v", err)
 	}
 
-	if server.address != "127.0.0.1" {
-		t.Errorf("Expected address 127.0.0.1, got %s", server.address)
-	}
-
-	if server.port != 9090 {
-		t.Errorf("Expected port 9090, got %d", server.port)
+	if got := server.config.Server.ListenAddr(); got != "127.0.0.1:9090" {
+		t.Errorf("Expected listen address 127.0.0.1:9090, got %s", got)
 	}
 }
 

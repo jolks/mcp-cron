@@ -271,13 +271,15 @@ func TestHeaderRoundTripperDoesNotMutateOriginal(t *testing.T) {
 // connection state cannot be set from mcp.json, while everything else
 // (including Authorization) is kept under its canonical name.
 func TestSanitizeHeaders(t *testing.T) {
-	clean, dropped := sanitizeHeaders(map[string]string{
-		"authorization":        "Bearer secret",
+	clean, dropped, duplicates := sanitizeHeaders(map[string]string{
+		"Authorization":        "Bearer first",
+		"authorization":        "Bearer second",
 		"mcp-session-id":       "stale-session",
 		"MCP-Protocol-Version": "1970-01-01",
 		"x-custom":             "kept",
 	})
-	want := map[string]string{"Authorization": "Bearer secret", "X-Custom": "kept"}
+	// The lexically last spelling wins deterministically on a collision
+	want := map[string]string{"Authorization": "Bearer second", "X-Custom": "kept"}
 	if len(clean) != len(want) {
 		t.Fatalf("clean = %v, want %v", clean, want)
 	}
@@ -288,6 +290,9 @@ func TestSanitizeHeaders(t *testing.T) {
 	}
 	if len(dropped) != 2 {
 		t.Errorf("dropped = %v, want the two reserved names", dropped)
+	}
+	if len(duplicates) != 1 || duplicates[0] != "authorization" {
+		t.Errorf("duplicates = %v, want [authorization]", duplicates)
 	}
 }
 
@@ -603,7 +608,7 @@ func TestNonSelfServerNotSkipped(t *testing.T) {
 // configured value, while absent ones are filled in.
 func TestHeaderRoundTripperDoesNotOverrideTransportHeaders(t *testing.T) {
 	base, seen := recordingTransport()
-	clean, _ := sanitizeHeaders(map[string]string{
+	clean, _, _ := sanitizeHeaders(map[string]string{
 		"Authorization": "Bearer secret",
 		"accept":        "text/event-stream",
 		"Content-Type":  "text/plain",

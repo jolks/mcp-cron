@@ -448,11 +448,11 @@ func TestParseConfigPrecedence(t *testing.T) {
 		t.Errorf("--auth-token should override env and be trimmed, got %q", cfg.Server.AuthToken)
 	}
 
-	// --auth-token "" keeps the env token (the flag has no env-derived
-	// default so the secret never shows up in -h output)
+	// --auth-token "" clears the env token, like every other explicit flag.
+	// The secret still never shows in -h: a Func flag has no printable default.
 	cfg, _ = parseConfig(newSet(), []string{"--auth-token", ""})
-	if cfg.Server.AuthToken != "env-token" {
-		t.Errorf("blank --auth-token should keep env token, got %q", cfg.Server.AuthToken)
+	if cfg.Server.AuthToken != "" {
+		t.Errorf("blank --auth-token should clear the env token, got %q", cfg.Server.AuthToken)
 	}
 
 	// --version is reported, and nothing else is disturbed

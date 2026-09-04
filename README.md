@@ -212,7 +212,7 @@ Boolean variables accept the forms understood by Go's `strconv.ParseBool`: `1`, 
 
 ### Configuration Precedence
 
-Defaults are overridden by environment variables, which are overridden by command-line flags that are explicitly passed — so `--allow-unauthenticated=false` does override `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=true`. `mcp-cron -h` shows the effective default for each flag, including values taken from the environment. The one exception is `--auth-token`: a blank value does not clear `MCP_CRON_SERVER_AUTH_TOKEN` (the token is deliberately never used as a flag default, so it cannot appear in `-h` output); unset the variable instead. Explicitly blanking a required setting (`--address ""` in HTTP mode, `--db-path ""`, `--ai-model ""`, `--mcp-config-path ""`) is rejected at startup rather than silently misbehaving. String environment variables are trimmed of surrounding whitespace; a blank value counts as unset.
+Defaults are overridden by environment variables, which are overridden by command-line flags that are explicitly passed — so `--allow-unauthenticated=false` does override `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=true`. `mcp-cron -h` shows the effective default for each flag, including values taken from the environment. This includes `--auth-token`: an explicit `--auth-token ""` clears `MCP_CRON_SERVER_AUTH_TOKEN`; the token is the one flag whose default is never shown in `-h`, so the secret cannot leak there. Explicitly blanking a required setting (`--address ""` in HTTP mode, `--db-path ""`, `--ai-model ""`, `--mcp-config-path ""`) is rejected at startup rather than silently misbehaving. String environment variables are trimmed of surrounding whitespace; a blank value counts as unset.
 
 ### Authentication
 
@@ -221,6 +221,8 @@ The HTTP transport supports optional bearer-token authentication. When a token i
 **Fail-closed rule**: binding a non-loopback address (e.g. `0.0.0.0`) in HTTP mode **requires** an auth token — without one, mcp-cron refuses to start. This is because the exposed MCP tools (`add_task`, `run_task`, ...) execute arbitrary shell commands; serving them unauthenticated on a network interface would be remote command execution for anyone who can reach the port. The default `localhost` bind needs no token.
 
 "Loopback" means the exact literal `localhost` or a loopback IP (`127.0.0.0/8`, `::1`, including bracketed or zoned forms such as `[::1]` and `::1%lo0`). Other hostnames — even ones that resolve to a loopback address, such as `ip6-localhost` or `localhost.localdomain` — are treated as non-loopback. This is deliberate: names are not resolved at validation time (resolution can change between check and use), and it is the same rule the MCP Go SDK applies to the `Host` header for its DNS-rebinding protection — which is why the match is case-sensitive: a `LOCALHOST` bind would pass here and then be refused with `403` on every request. Use the IP literal, or `--allow-unauthenticated` if you accept the risk. `--address` takes a host only; a value with an embedded port (`127.0.0.1:9000`) is rejected — use `--port`.
+
+If mcp-cron listens on loopback behind a reverse proxy, note that the MCP SDK's DNS-rebinding protection returns `403 Forbidden` for requests whose `Host` header is not a loopback name; configure the proxy to send `Host: localhost:<port>` upstream.
 
 ```bash
 # Loopback (default) — no token required

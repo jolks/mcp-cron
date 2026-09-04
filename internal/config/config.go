@@ -239,7 +239,7 @@ func (s *ServerConfig) ListenAddr() string {
 	return net.JoinHostPort(hostLiteral(s.Address), strconv.Itoa(s.Port))
 }
 
-// SetAuthToken applies a token from any source (env var, flag), trimming
+// SetAuthToken applies a token from the environment, trimming
 // surrounding whitespace — typically a trailing newline from a secret file
 // created with `echo` — and treating a blank value as "not set" so it does
 // not clear a token supplied elsewhere.

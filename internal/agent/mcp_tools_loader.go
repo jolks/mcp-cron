@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"sort"
 	"strings"
 
 	"github.com/jolks/mcp-cron/internal/config"
@@ -32,20 +33,31 @@ var reservedHeaders = map[string]bool{
 }
 
 // sanitizeHeaders canonicalizes configured header names and drops the
-// reserved ones. It returns the dropped names so the caller can log them
-// once at load time rather than on every request, which also keeps
-// RoundTrip a plain copy loop.
-func sanitizeHeaders(in map[string]string) (clean map[string]string, dropped []string) {
+// reserved ones. It returns the dropped and duplicated names so the caller
+// can log them once at load time rather than on every request, which also
+// keeps RoundTrip a plain copy loop. Keys are visited in sorted order so
+// that when two spellings collapse to one canonical name (JSON keys are
+// case-sensitive, header names are not) the winner is deterministic — the
+// lexically last spelling — instead of varying per run with map iteration.
+func sanitizeHeaders(in map[string]string) (clean map[string]string, dropped, duplicates []string) {
 	clean = make(map[string]string, len(in))
-	for k, v := range in {
+	keys := make([]string, 0, len(in))
+	for k := range in {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
 		canonical := http.CanonicalHeaderKey(k)
 		if reservedHeaders[canonical] {
 			dropped = append(dropped, k)
 			continue
 		}
-		clean[canonical] = v
+		if _, exists := clean[canonical]; exists {
+			duplicates = append(duplicates, k)
+		}
+		clean[canonical] = in[k]
 	}
-	return clean, dropped
+	return clean, dropped, duplicates
 }
 
 // headerRoundTripper adds static headers (e.g. an Authorization bearer
@@ -167,9 +179,12 @@ func buildToolsFromConfig(sysCfg *config.Config, logger *logging.Logger) ([]Tool
 		case spec.URL != "":
 			st := &mcp.StreamableClientTransport{Endpoint: spec.URL}
 			if len(spec.Headers) > 0 {
-				headers, dropped := sanitizeHeaders(spec.Headers)
+				headers, dropped, duplicates := sanitizeHeaders(spec.Headers)
 				for _, k := range dropped {
 					logger.Warnf("MCP server %q: ignoring configured header %q; it is set per request by the transport", name, k)
+				}
+				for _, k := range duplicates {
+					logger.Warnf("MCP server %q: header %q duplicates another entry differing only in letter case; its value wins — remove one of them", name, k)
 				}
 				client, err := newHeaderInjectingClient(spec.URL, headers)
 				if err != nil {

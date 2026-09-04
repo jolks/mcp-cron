@@ -78,8 +78,6 @@ type MCPServer struct {
 	httpServer     *http.Server
 	listener       net.Listener
 	cancel         context.CancelFunc
-	address        string
-	port           int
 	stopCh         chan struct{}
 	wg             sync.WaitGroup
 	config         *config.Config
@@ -167,8 +165,6 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		httpExecutor:  httpExecutor,
 		resultStore:   resultStore,
 		server:        mcpSrv,
-		address:       cfg.Server.Address,
-		port:          cfg.Server.Port,
 		stopCh:        make(chan struct{}),
 		config:        cfg,
 		logger:        logger,
@@ -225,7 +221,14 @@ func (s *MCPServer) Start(ctx context.Context) error {
 			return fmt.Errorf("failed to listen on %s: %w", addr, err)
 		}
 		s.listener = ln
-		s.httpServer = &http.Server{Handler: handler}
+		s.httpServer = &http.Server{
+			Handler: handler,
+			// Bounds only the header-read phase, which runs before the auth
+			// middleware — without it an unauthenticated client trickling
+			// header bytes holds a connection (and goroutine) open forever.
+			// ReadTimeout/WriteTimeout must stay 0: SSE streams are long-lived.
+			ReadHeaderTimeout: 10 * time.Second,
+		}
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
