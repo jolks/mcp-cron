@@ -142,7 +142,7 @@ func RunTask(ctx context.Context, t *model.Task, cfg *config.Config, resultStore
 	logger.Infof("Running AI task: %s", t.Name)
 
 	// Get tools for the AI agent from MCP config
-	tools, mcpDispatcher, closeMCP, err := buildToolsFromConfig(cfg)
+	tools, mcpDispatcher, closeMCP, err := buildToolsFromConfig(cfg, logger)
 	if closeMCP != nil {
 		defer closeMCP()
 	}

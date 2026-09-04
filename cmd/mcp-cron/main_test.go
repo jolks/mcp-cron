@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"io"
 	"os"
 	"os/exec"
@@ -397,4 +398,66 @@ func TestRepeatedSpawnOnlyOnePrimaryAlive(t *testing.T) {
 	// Clean up.
 	_ = first.cmd.Process.Signal(syscall.SIGINT)
 	<-first.done
+}
+
+// TestParseConfigPrecedence pins the resolution order defaults < env < flags,
+// including the cases the old zero-value-sentinel applier could not express:
+// an explicit false overriding an env true, and an explicit flag equal to the
+// built-in default still taking effect.
+func TestParseConfigPrecedence(t *testing.T) {
+	t.Setenv("MCP_CRON_SERVER_PORT", "9001")
+	t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", "true")
+	t.Setenv("MCP_CRON_PREVENT_SLEEP", "true")
+	t.Setenv("MCP_CRON_POLL_INTERVAL", "5s")
+	t.Setenv("MCP_CRON_SERVER_AUTH_TOKEN", "env-token")
+
+	newSet := func() *flag.FlagSet { return flag.NewFlagSet("test", flag.ContinueOnError) }
+
+	// Env only: every env value is applied over the defaults
+	cfg, showVersion := parseConfig(newSet(), nil)
+	if showVersion {
+		t.Error("--version reported without being passed")
+	}
+	if cfg.Server.Port != 9001 || !cfg.Server.AllowUnauthenticated || !cfg.PreventSleep || cfg.Scheduler.PollInterval != 5*time.Second || cfg.Server.AuthToken != "env-token" {
+		t.Errorf("env not applied: port=%d allowUnauth=%v preventSleep=%v poll=%v token=%q",
+			cfg.Server.Port, cfg.Server.AllowUnauthenticated, cfg.PreventSleep, cfg.Scheduler.PollInterval, cfg.Server.AuthToken)
+	}
+
+	// Explicit flags win over env — including a boolean set to false and a
+	// value equal to the built-in default (port 8080, poll 1s)
+	cfg, _ = parseConfig(newSet(), []string{
+		"--port", "8080",
+		"--allow-unauthenticated=false",
+		"--prevent-sleep=false",
+		"--poll-interval", "1s",
+		"--auth-token", " flag-token\n",
+	})
+	if cfg.Server.Port != 8080 {
+		t.Errorf("--port 8080 should override env 9001, got %d", cfg.Server.Port)
+	}
+	if cfg.Server.AllowUnauthenticated {
+		t.Error("--allow-unauthenticated=false should override env true")
+	}
+	if cfg.PreventSleep {
+		t.Error("--prevent-sleep=false should override env true")
+	}
+	if cfg.Scheduler.PollInterval != time.Second {
+		t.Errorf("--poll-interval 1s should override env 5s, got %v", cfg.Scheduler.PollInterval)
+	}
+	if cfg.Server.AuthToken != "flag-token" {
+		t.Errorf("--auth-token should override env and be trimmed, got %q", cfg.Server.AuthToken)
+	}
+
+	// --auth-token "" clears the env token, like every other explicit flag.
+	// The secret still never shows in -h: a Func flag has no printable default.
+	cfg, _ = parseConfig(newSet(), []string{"--auth-token", ""})
+	if cfg.Server.AuthToken != "" {
+		t.Errorf("blank --auth-token should clear the env token, got %q", cfg.Server.AuthToken)
+	}
+
+	// --version is reported, and nothing else is disturbed
+	cfg, showVersion = parseConfig(newSet(), []string{"--version"})
+	if !showVersion || cfg.Server.Port != 9001 {
+		t.Errorf("--version: showVersion=%v port=%d", showVersion, cfg.Server.Port)
+	}
 }

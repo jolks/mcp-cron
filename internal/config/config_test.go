@@ -2,8 +2,10 @@
 package config
 
 import (
+	"net"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -117,6 +119,249 @@ func TestValidate(t *testing.T) {
 	invalidMaxIterations.AI.MaxToolIterations = 0
 	if err := invalidMaxIterations.Validate(); err == nil {
 		t.Error("Expected error for zero max tool iterations, got nil")
+	}
+
+	// Non-positive poll interval would panic time.NewTicker at run time
+	for _, pi := range []time.Duration{0, -time.Second} {
+		invalidPoll := DefaultConfig()
+		invalidPoll.Scheduler.PollInterval = pi
+		if err := invalidPoll.Validate(); err == nil {
+			t.Errorf("Expected error for poll interval %v, got nil", pi)
+		}
+	}
+
+	// Address must be a host only; the port is a separate setting
+	for _, addr := range []string{"127.0.0.1:9000", "[::1]:9000", "localhost:9000"} {
+		withPort := DefaultConfig()
+		withPort.Server.Address = addr
+		err := withPort.Validate()
+		if err == nil || !strings.Contains(err.Error(), "must not include a port") {
+			t.Errorf("Expected embedded-port error for address %q, got %v", addr, err)
+		}
+	}
+	// ...but only for HTTP, where the address is used
+	stdioWithPort := DefaultConfig()
+	stdioWithPort.Server.TransportMode = TransportStdio
+	stdioWithPort.Server.Address = "127.0.0.1:9000"
+	if err := stdioWithPort.Validate(); err != nil {
+		t.Errorf("Expected no address error in stdio mode, got %v", err)
+	}
+
+	// Flags are bound directly to config fields, so an explicit empty value
+	// reaches Validate; required settings must reject it instead of silently
+	// misbehaving (--address "" would bind every interface, --db-path ""
+	// opens a throwaway temp database).
+	empties := []struct {
+		name   string
+		mutate func(*Config)
+	}{
+		{"empty address in http mode", func(c *Config) { c.Server.Address = "" }},
+		{"empty db path", func(c *Config) { c.Store.DBPath = "" }},
+		{"empty AI model", func(c *Config) { c.AI.Model = "" }},
+		{"empty MCP config path", func(c *Config) { c.AI.MCPConfigFilePath = "" }},
+	}
+	for _, tc := range empties {
+		cfg := DefaultConfig()
+		cfg.Server.AuthToken = "secret" // isolate the emptiness check from the loopback rule
+		tc.mutate(cfg)
+		if err := cfg.Validate(); err == nil {
+			t.Errorf("%s: expected validation error, got nil", tc.name)
+		}
+	}
+	// An empty address is fine in stdio mode, where it is unused
+	stdioEmpty := DefaultConfig()
+	stdioEmpty.Server.TransportMode = TransportStdio
+	stdioEmpty.Server.Address = ""
+	if err := stdioEmpty.Validate(); err != nil {
+		t.Errorf("Expected no error for empty address in stdio mode, got %v", err)
+	}
+}
+
+func TestIsLoopbackAddress(t *testing.T) {
+	tests := []struct {
+		addr string
+		want bool
+	}{
+		{"localhost", true},
+		{"LOCALHOST", false}, // go-sdk's Host-header check is case-sensitive; accepting it here would 403 every request
+		{"127.0.0.1", true},
+		{"127.0.0.2", true},
+		{"::1", true},
+		{"[::1]", true},
+		{"::1%lo0", true},
+		{"[::1%lo0]", true},
+		{"[127.0.0.1]", true},
+		{"", false},
+		{"0.0.0.0", false},
+		{"::", false},
+		{"[::]", false},
+		{"[", false},
+		{"192.168.1.5", false},
+		{"example.com", false},
+	}
+	for _, tt := range tests {
+		if got := IsLoopbackAddress(tt.addr); got != tt.want {
+			t.Errorf("IsLoopbackAddress(%q) = %v, want %v", tt.addr, got, tt.want)
+		}
+	}
+}
+
+func TestListenAddr(t *testing.T) {
+	tests := []struct {
+		host string
+		port int
+		want string
+	}{
+		{"localhost", 8080, "localhost:8080"},
+		{"127.0.0.1", 8080, "127.0.0.1:8080"},
+		{"::1", 8080, "[::1]:8080"},
+		{"[::1]", 8080, "[::1]:8080"},
+		{"::1%lo0", 8080, "[::1%lo0]:8080"},
+		{"0.0.0.0", 8080, "0.0.0.0:8080"},
+		{"", 8080, ":8080"},
+	}
+	for _, tt := range tests {
+		s := ServerConfig{Address: tt.host, Port: tt.port}
+		if got := s.ListenAddr(); got != tt.want {
+			t.Errorf("ListenAddr(%q, %d) = %q, want %q", tt.host, tt.port, got, tt.want)
+		}
+	}
+
+	// The IPv6 form must actually be listenable: this is the regression
+	// ("::1:8080" → "too many colons") that bracketing fixes.
+	ln, err := net.Listen("tcp", (&ServerConfig{Address: "::1"}).ListenAddr())
+	if err != nil {
+		t.Skipf("IPv6 loopback unavailable on this host: %v", err)
+	}
+	_ = ln.Close()
+}
+
+func TestValidateAuth(t *testing.T) {
+	cases := []struct {
+		name    string
+		mutate  func(*ServerConfig)
+		wantErr bool
+	}{
+		{"http non-loopback without token", func(s *ServerConfig) { s.Address = "0.0.0.0" }, true},
+		{"http non-loopback with token", func(s *ServerConfig) { s.Address = "0.0.0.0"; s.AuthToken = "secret" }, false},
+		{"http non-loopback with explicit override", func(s *ServerConfig) { s.Address = "0.0.0.0"; s.AllowUnauthenticated = true }, false},
+		{"stdio is unaffected by the address", func(s *ServerConfig) { s.TransportMode = TransportStdio; s.Address = "0.0.0.0" }, false},
+		// Tokens that can never match an HTTP request are rejected at startup
+		{"token with internal space", func(s *ServerConfig) { s.AuthToken = "sec ret" }, true},
+		{"token with trailing newline", func(s *ServerConfig) { s.AuthToken = "secret\n" }, true},
+		{"token with tab", func(s *ServerConfig) { s.AuthToken = "\tsecret" }, true},
+		{"token with control char", func(s *ServerConfig) { s.AuthToken = "sec\x00ret" }, true},
+		// The token is ignored by the stdio transport, so its format is not checked there
+		{"stdio ignores a malformed token", func(s *ServerConfig) { s.TransportMode = TransportStdio; s.AuthToken = "sec ret" }, false},
+		// Ordinary tokens, including ones outside the b64token alphabet, are fine
+		{"plain token", func(s *ServerConfig) { s.AuthToken = "secret" }, false},
+		{"b64token alphabet", func(s *ServerConfig) { s.AuthToken = "s3cr3t-token_with.dots~and+slashes/==" }, false},
+		{"punctuation token", func(s *ServerConfig) { s.AuthToken = "p@ss:w0rd!" }, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := DefaultConfig()
+			tc.mutate(&cfg.Server)
+			err := cfg.Validate()
+			if tc.wantErr && err == nil {
+				t.Fatal("expected validation error, got nil")
+			}
+			if !tc.wantErr && err != nil {
+				t.Fatalf("expected no error, got: %v", err)
+			}
+			if err != nil && cfg.Server.AuthToken != "" && strings.Contains(err.Error(), cfg.Server.AuthToken) {
+				t.Errorf("validation error must not echo the token; got %q", err)
+			}
+		})
+	}
+}
+
+func TestFromEnvIgnoresUnparseable(t *testing.T) {
+	// Every non-string env var goes through envParse: a bad value is logged
+	// and ignored, leaving the prior value in place.
+	t.Setenv("MCP_CRON_SERVER_PORT", "eighty")
+	t.Setenv("MCP_CRON_POLL_INTERVAL", "1sec")
+	t.Setenv("MCP_CRON_AI_MAX_TOOL_ITERATIONS", "many")
+	cfg := DefaultConfig()
+	want := *cfg
+	FromEnv(cfg)
+	if cfg.Server.Port != want.Server.Port || cfg.Scheduler.PollInterval != want.Scheduler.PollInterval || cfg.AI.MaxToolIterations != want.AI.MaxToolIterations {
+		t.Errorf("unparseable env values were applied: port=%d poll=%v iterations=%d", cfg.Server.Port, cfg.Scheduler.PollInterval, cfg.AI.MaxToolIterations)
+	}
+}
+
+func TestFromEnvTrimsStrings(t *testing.T) {
+	// A trailing newline from command substitution must not make a loopback
+	// address look non-loopback (which would suggest --allow-unauthenticated)
+	t.Setenv("MCP_CRON_SERVER_ADDRESS", " 127.0.0.1\n")
+	t.Setenv("MCP_CRON_AI_MODEL", "gpt-4o \n")
+	t.Setenv("MCP_CRON_LOGGING_LEVEL", "  ") // blank means unset
+	cfg := DefaultConfig()
+	FromEnv(cfg)
+	if cfg.Server.Address != "127.0.0.1" {
+		t.Errorf("Expected trimmed address, got %q", cfg.Server.Address)
+	}
+	if cfg.AI.Model != "gpt-4o" {
+		t.Errorf("Expected trimmed model, got %q", cfg.AI.Model)
+	}
+	if cfg.Logging.Level != "info" {
+		t.Errorf("Expected blank env to keep default log level, got %q", cfg.Logging.Level)
+	}
+}
+
+func TestFromEnvPreventSleep(t *testing.T) {
+	for val, want := range map[string]bool{"true": true, "1": true, "TRUE": true, "0": false, "false": false} {
+		t.Setenv("MCP_CRON_PREVENT_SLEEP", val)
+		cfg := DefaultConfig()
+		FromEnv(cfg)
+		if cfg.PreventSleep != want {
+			t.Errorf("MCP_CRON_PREVENT_SLEEP=%q: got %v, want %v", val, cfg.PreventSleep, want)
+		}
+	}
+}
+
+func TestFromEnvAuth(t *testing.T) {
+	t.Setenv("MCP_CRON_SERVER_AUTH_TOKEN", "env-secret")
+	cfg := DefaultConfig()
+	FromEnv(cfg)
+	if cfg.Server.AuthToken != "env-secret" {
+		t.Errorf("Expected auth token 'env-secret', got '%s'", cfg.Server.AuthToken)
+	}
+
+	// strconv.ParseBool forms are accepted, not just the literal "true"
+	for val, want := range map[string]bool{"TRUE": true, "1": true, "t": true, "True": true, "false": false, "0": false, "f": false, "FALSE": false} {
+		t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", val)
+		cfg = DefaultConfig()
+		FromEnv(cfg)
+		if cfg.Server.AllowUnauthenticated != want {
+			t.Errorf("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=%q: got %v, want %v", val, cfg.Server.AllowUnauthenticated, want)
+		}
+	}
+
+	// An unparseable value is ignored (leaves the prior value), not treated as false
+	t.Setenv("MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED", "yes")
+	cfg = DefaultConfig()
+	cfg.Server.AllowUnauthenticated = true
+	FromEnv(cfg)
+	if !cfg.Server.AllowUnauthenticated {
+		t.Error("Expected unparseable MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=yes to be ignored, but it was applied as false")
+	}
+
+	// Surrounding whitespace (e.g. a trailing newline from `echo` into a
+	// secret file) is trimmed so the token actually matches requests
+	t.Setenv("MCP_CRON_SERVER_AUTH_TOKEN", " env-secret\n")
+	cfg = DefaultConfig()
+	FromEnv(cfg)
+	if cfg.Server.AuthToken != "env-secret" {
+		t.Errorf("Expected trimmed auth token 'env-secret', got %q", cfg.Server.AuthToken)
+	}
+
+	// Whitespace-only is treated as unset
+	t.Setenv("MCP_CRON_SERVER_AUTH_TOKEN", "  \n")
+	cfg = DefaultConfig()
+	FromEnv(cfg)
+	if cfg.Server.AuthToken != "" {
+		t.Errorf("Expected whitespace-only token to be treated as unset, got %q", cfg.Server.AuthToken)
 	}
 }
 

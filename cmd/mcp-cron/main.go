@@ -8,6 +8,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -24,34 +25,9 @@ import (
 	"github.com/jolks/mcp-cron/internal/store"
 )
 
-var (
-	address         = flag.String("address", "", "The address to bind the server to")
-	port            = flag.Int("port", 0, "The port to bind the server to")
-	transport       = flag.String("transport", "", "Transport mode: http or stdio")
-	logLevel        = flag.String("log-level", "", "Logging level: debug, info, warn, error, fatal")
-	logFile         = flag.String("log-file", "", "Log file path (default: stdout)")
-	version         = flag.Bool("version", false, "Show version information and exit")
-	aiProvider      = flag.String("ai-provider", "", "AI provider: openai or anthropic (default: openai)")
-	aiBaseURL       = flag.String("ai-base-url", "", "Custom base URL for OpenAI-compatible endpoints (e.g. Ollama, vLLM, Groq, LiteLLM)")
-	aiModel         = flag.String("ai-model", "", "AI model to use for AI tasks (default: gpt-4o)")
-	aiMaxIterations = flag.Int("ai-max-iterations", 0, "Maximum iterations for tool-enabled AI tasks (default: 20)")
-	mcpConfigPath   = flag.String("mcp-config-path", "", "Path to MCP configuration file (default: ~/.cursor/mcp.json)")
-	dbPath          = flag.String("db-path", "", "Path to SQLite database for result history (default: ~/.mcp-cron/results.db)")
-	preventSleep    = flag.Bool("prevent-sleep", false, "Prevent system from sleeping while mcp-cron is running (macOS and Windows only)")
-	pollInterval    = flag.Duration("poll-interval", time.Second, "How often to check for due tasks")
-)
-
 func main() {
-	flag.Parse()
-
 	// Load configuration
 	cfg := loadConfig()
-
-	// Show version and exit if requested
-	if *version {
-		log.Printf("%s version %s", config.ServerName, config.Version)
-		os.Exit(0)
-	}
 
 	// Try to become the primary instance for this db-path.
 	// Primary: enters keep-alive mode after transport exits (scheduler continues).
@@ -83,66 +59,58 @@ func main() {
 	waitForShutdown(cancel, app, isPrimary)
 }
 
-// loadConfig loads configuration from environment and command line flags
+// loadConfig resolves the configuration from defaults, environment variables
+// and command-line flags, handles --version, and validates the result.
 func loadConfig() *config.Config {
-	// Start with defaults
-	cfg := config.DefaultConfig()
+	cfg, showVersion := parseConfig(flag.CommandLine, os.Args[1:])
 
-	// Override with environment variables
-	config.FromEnv(cfg)
+	// Before validation, so --version works even under an invalid configuration
+	if showVersion {
+		log.Printf("%s version %s", config.ServerName, config.Version)
+		os.Exit(0)
+	}
 
-	// Override with command-line flags
-	applyCommandLineFlagsToConfig(cfg)
-
-	// Validate the configuration
 	if err := cfg.Validate(); err != nil {
 		log.Fatalf("Invalid configuration: %v", err)
 	}
-
 	return cfg
 }
 
-// applyCommandLineFlagsToConfig applies command line flags to the configuration
-func applyCommandLineFlagsToConfig(cfg *config.Config) {
-	if *address != "" {
-		cfg.Server.Address = *address
-	}
-	if *port != 0 {
-		cfg.Server.Port = *port
-	}
-	if *transport != "" {
-		cfg.Server.TransportMode = *transport
-	}
-	if *logLevel != "" {
-		cfg.Logging.Level = *logLevel
-	}
-	if *logFile != "" {
-		cfg.Logging.FilePath = *logFile
-	}
-	if *aiProvider != "" {
-		cfg.AI.Provider = *aiProvider
-	}
-	if *aiBaseURL != "" {
-		cfg.AI.BaseURL = *aiBaseURL
-	}
-	if *aiModel != "" {
-		cfg.AI.Model = *aiModel
-	}
-	if *aiMaxIterations > 0 {
-		cfg.AI.MaxToolIterations = *aiMaxIterations
-	}
-	if *mcpConfigPath != "" {
-		cfg.AI.MCPConfigFilePath = *mcpConfigPath
-	}
-	if *dbPath != "" {
-		cfg.Store.DBPath = *dbPath
-	}
-	if *preventSleep {
-		cfg.PreventSleep = true
-	}
-	if *pollInterval > 0 {
-		cfg.Scheduler.PollInterval = *pollInterval
-	}
+// parseConfig applies the precedence defaults < environment < flags. Each
+// flag is bound directly to its config field with the env-resolved value as
+// the flag default, so an explicitly passed flag always wins (including
+// --allow-unauthenticated=false), there is a single source of defaults, and
+// -h shows the effective values.
+//
+// --auth-token is registered with fs.Func rather than a StringVar bound to
+// the field: a Func flag has no printable default, so the env-supplied
+// token can never appear in -h output, while an explicitly passed value —
+// including "" — still overrides the environment like every other flag.
+func parseConfig(fs *flag.FlagSet, args []string) (cfg *config.Config, showVersion bool) {
+	cfg = config.DefaultConfig()
+	config.FromEnv(cfg)
+
+	fs.StringVar(&cfg.Server.Address, "address", cfg.Server.Address, "The address to bind the server to (host only; see --port)")
+	fs.IntVar(&cfg.Server.Port, "port", cfg.Server.Port, "The port to bind the server to")
+	fs.StringVar(&cfg.Server.TransportMode, "transport", cfg.Server.TransportMode, "Transport mode: http or stdio")
+	fs.Func("auth-token", "Bearer token required for HTTP transport requests (prefer MCP_CRON_SERVER_AUTH_TOKEN to keep it out of process listings)", func(v string) error {
+		cfg.Server.AuthToken = strings.TrimSpace(v)
+		return nil
+	})
+	fs.BoolVar(&cfg.Server.AllowUnauthenticated, "allow-unauthenticated", cfg.Server.AllowUnauthenticated, "Allow HTTP transport on a non-loopback address without an auth token (dangerous)")
+	fs.StringVar(&cfg.Logging.Level, "log-level", cfg.Logging.Level, "Logging level: debug, info, warn, error, fatal")
+	fs.StringVar(&cfg.Logging.FilePath, "log-file", cfg.Logging.FilePath, "Log file path (default: stdout)")
+	fs.BoolVar(&showVersion, "version", false, "Show version information and exit")
+	fs.StringVar(&cfg.AI.Provider, "ai-provider", cfg.AI.Provider, "AI provider: openai or anthropic")
+	fs.StringVar(&cfg.AI.BaseURL, "ai-base-url", cfg.AI.BaseURL, "Custom base URL for OpenAI-compatible endpoints (e.g. Ollama, vLLM, Groq, LiteLLM)")
+	fs.StringVar(&cfg.AI.Model, "ai-model", cfg.AI.Model, "AI model to use for AI tasks")
+	fs.IntVar(&cfg.AI.MaxToolIterations, "ai-max-iterations", cfg.AI.MaxToolIterations, "Maximum iterations for tool-enabled AI tasks")
+	fs.StringVar(&cfg.AI.MCPConfigFilePath, "mcp-config-path", cfg.AI.MCPConfigFilePath, "Path to MCP configuration file")
+	fs.StringVar(&cfg.Store.DBPath, "db-path", cfg.Store.DBPath, "Path to SQLite database for result history")
+	fs.BoolVar(&cfg.PreventSleep, "prevent-sleep", cfg.PreventSleep, "Prevent system from sleeping while mcp-cron is running (macOS and Windows only)")
+	fs.DurationVar(&cfg.Scheduler.PollInterval, "poll-interval", cfg.Scheduler.PollInterval, "How often to check for due tasks")
+	_ = fs.Parse(args) // flag.CommandLine exits on error; a ContinueOnError set (tests) reports via the config
+	return cfg, showVersion
 }
 
 // Application represents the running application

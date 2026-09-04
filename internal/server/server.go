@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -75,9 +76,8 @@ type MCPServer struct {
 	resultStore    model.ResultStore
 	server         *mcp.Server
 	httpServer     *http.Server
+	listener       net.Listener
 	cancel         context.CancelFunc
-	address        string
-	port           int
 	stopCh         chan struct{}
 	wg             sync.WaitGroup
 	config         *config.Config
@@ -146,7 +146,7 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 	case config.TransportStdio:
 		logger.Infof("Using stdio transport")
 	case config.TransportHTTP:
-		logger.Infof("Using Streamable HTTP transport on %s:%d", cfg.Server.Address, cfg.Server.Port)
+		logger.Infof("Using Streamable HTTP transport on %s", cfg.Server.ListenAddr())
 	default:
 		return nil, errors.InvalidInput(fmt.Sprintf("unsupported transport mode: %s", cfg.Server.TransportMode))
 	}
@@ -165,8 +165,6 @@ func NewMCPServer(cfg *config.Config, scheduler *scheduler.Scheduler, cmdExecuto
 		httpExecutor:  httpExecutor,
 		resultStore:   resultStore,
 		server:        mcpSrv,
-		address:       cfg.Server.Address,
-		port:          cfg.Server.Port,
 		stopCh:        make(chan struct{}),
 		config:        cfg,
 		logger:        logger,
@@ -185,6 +183,9 @@ func (s *MCPServer) Start(ctx context.Context) error {
 
 	switch s.config.Server.TransportMode {
 	case config.TransportStdio:
+		if s.config.Server.AuthEnabled() {
+			s.logger.Warnf("An auth token is configured but the stdio transport has no HTTP authentication; it is ignored")
+		}
 		runCtx, cancel := context.WithCancel(ctx)
 		s.cancel = cancel
 		s.wg.Add(1)
@@ -197,15 +198,41 @@ func (s *MCPServer) Start(ctx context.Context) error {
 			close(s.stopCh)
 		}()
 	case config.TransportHTTP:
-		addr := fmt.Sprintf("%s:%d", s.address, s.port)
-		handler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+		// Enforce the fail-closed rule here as well as in config.Validate():
+		// this is the layer that opens the socket, and Validate() only runs
+		// from the CLI entry point.
+		if err := s.config.Server.CheckAuthPolicy(); err != nil {
+			return err
+		}
+		addr := s.config.Server.ListenAddr()
+		var handler http.Handler = mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
 			return s.server
 		}, nil)
-		s.httpServer = &http.Server{Addr: addr, Handler: handler}
+		if s.config.Server.AuthEnabled() {
+			handler = requireBearerToken(s.config.Server.AuthToken, handler)
+			s.logger.Infof("HTTP bearer-token authentication enabled")
+		} else if s.config.Server.UnauthenticatedNonLoopback() {
+			s.logger.Warnf("HTTP transport serving on non-loopback address %s WITHOUT authentication", addr)
+		}
+		// Bind synchronously so a port clash or bad address fails Start()
+		// instead of being logged from a goroutine after startup "succeeded".
+		ln, err := net.Listen("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("failed to listen on %s: %w", addr, err)
+		}
+		s.listener = ln
+		s.httpServer = &http.Server{
+			Handler: handler,
+			// Bounds only the header-read phase, which runs before the auth
+			// middleware — without it an unauthenticated client trickling
+			// header bytes holds a connection (and goroutine) open forever.
+			// ReadTimeout/WriteTimeout must stay 0: SSE streams are long-lived.
+			ReadHeaderTimeout: 10 * time.Second,
+		}
 		s.wg.Add(1)
 		go func() {
 			defer s.wg.Done()
-			if err := s.httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			if err := s.httpServer.Serve(ln); err != nil && err != http.ErrServerClosed {
 				s.logger.Errorf("Error running MCP server: %v", err)
 			}
 		}()
@@ -257,6 +284,16 @@ func (s *MCPServer) Stop() error {
 
 	s.wg.Wait()
 	return nil
+}
+
+// ListenAddr returns the address the HTTP transport is bound to. It is nil
+// in stdio mode and until Start() has successfully bound the socket, so
+// tests that pass port 0 can discover the chosen port.
+func (s *MCPServer) ListenAddr() net.Addr {
+	if s.listener == nil {
+		return nil
+	}
+	return s.listener.Addr()
 }
 
 // Done returns a channel that is closed when the server's transport exits.

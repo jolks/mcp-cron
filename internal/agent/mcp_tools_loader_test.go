@@ -5,13 +5,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
-	"log"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/jolks/mcp-cron/internal/config"
@@ -31,10 +31,6 @@ func TestBuildToolsFromConfig(t *testing.T) {
 		t.Fatalf("Failed to create temp directory: %v", err)
 	}
 	defer func() { _ = os.RemoveAll(tempDir) }()
-
-	// Suppress expected log output from connection failures
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
 
 	// Create a valid MCP config file
 	validConfig := `{
@@ -75,7 +71,7 @@ func TestBuildToolsFromConfig(t *testing.T) {
 		},
 	}
 
-	tools, dispatcher, closeFn, err := buildToolsFromConfig(cfg)
+	tools, dispatcher, closeFn, err := buildToolsFromConfig(cfg, testLogger())
 	if closeFn != nil {
 		defer closeFn()
 	}
@@ -96,7 +92,7 @@ func TestBuildToolsFromConfig(t *testing.T) {
 			MCPConfigFilePath: invalidConfigPath,
 		},
 	}
-	_, _, _, err = buildToolsFromConfig(invalidCfg)
+	_, _, _, err = buildToolsFromConfig(invalidCfg, testLogger())
 	if err == nil {
 		t.Error("Expected error for invalid config file, got nil")
 	}
@@ -107,7 +103,7 @@ func TestBuildToolsFromConfig(t *testing.T) {
 			MCPConfigFilePath: filepath.Join(tempDir, "non-existent.json"),
 		},
 	}
-	_, _, _, err = buildToolsFromConfig(nonExistentCfg)
+	_, _, _, err = buildToolsFromConfig(nonExistentCfg, testLogger())
 	if err == nil {
 		t.Error("Expected error for non-existent file, got nil")
 	}
@@ -227,6 +223,252 @@ func TestStreamableHTTPTransport(t *testing.T) {
 	}
 }
 
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (f roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) { return f(req) }
+
+// recordingTransport returns a RoundTripper that captures the headers of the
+// request it receives and answers 200.
+func recordingTransport() (http.RoundTripper, *http.Header) {
+	seen := &http.Header{}
+	return roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		*seen = req.Header
+		rec := httptest.NewRecorder()
+		rec.WriteHeader(http.StatusOK)
+		return rec.Result(), nil
+	}), seen
+}
+
+func mustURL(t *testing.T, raw string) *url.URL {
+	t.Helper()
+	u, err := url.Parse(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return u
+}
+
+func TestHeaderRoundTripperDoesNotMutateOriginal(t *testing.T) {
+	base, seen := recordingTransport()
+	rt := &headerRoundTripper{base: base, origin: mustURL(t, "http://example.com/"), headers: map[string]string{"Authorization": "Bearer secret"}}
+
+	orig := httptest.NewRequest(http.MethodGet, "http://example.com/", nil)
+	resp, err := rt.RoundTrip(orig)
+	if err != nil {
+		t.Fatalf("RoundTrip failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if got := seen.Get("Authorization"); got != "Bearer secret" {
+		t.Errorf("Expected injected Authorization header, got %q", got)
+	}
+	if got := orig.Header.Get("Authorization"); got != "" {
+		t.Errorf("Original request was mutated: Authorization = %q", got)
+	}
+}
+
+// TestSanitizeHeaders verifies that headers the transport derives from
+// connection state cannot be set from mcp.json, while everything else
+// (including Authorization) is kept under its canonical name.
+func TestSanitizeHeaders(t *testing.T) {
+	clean, dropped, duplicates := sanitizeHeaders(map[string]string{
+		"Authorization":        "Bearer first",
+		"authorization":        "Bearer second",
+		"mcp-session-id":       "stale-session",
+		"MCP-Protocol-Version": "1970-01-01",
+		"x-custom":             "kept",
+	})
+	// The lexically last spelling wins deterministically on a collision
+	want := map[string]string{"Authorization": "Bearer second", "X-Custom": "kept"}
+	if len(clean) != len(want) {
+		t.Fatalf("clean = %v, want %v", clean, want)
+	}
+	for k, v := range want {
+		if clean[k] != v {
+			t.Errorf("clean[%q] = %q, want %q", k, clean[k], v)
+		}
+	}
+	if len(dropped) != 2 {
+		t.Errorf("dropped = %v, want the two reserved names", dropped)
+	}
+	if len(duplicates) != 1 || duplicates[0] != "authorization" {
+		t.Errorf("duplicates = %v, want [authorization]", duplicates)
+	}
+}
+
+func mustClient(t *testing.T, endpoint string, headers map[string]string) *http.Client {
+	t.Helper()
+	client, err := newHeaderInjectingClient(endpoint, headers)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return client
+}
+
+// TestHeaderInjectingClientRefusesCrossOriginRedirect guards against token
+// leakage: net/http strips Authorization on a cross-host redirect, but
+// headerRoundTripper sits below that logic and would re-add it. The
+// transport must refuse the hop so the configured headers never reach the
+// other origin.
+func TestHeaderInjectingClientRefusesCrossOriginRedirect(t *testing.T) {
+	var attackerHits int32
+	var leaked http.Header
+	attacker := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		atomic.AddInt32(&attackerHits, 1)
+		leaked = r.Header.Clone()
+		w.WriteHeader(http.StatusOK)
+	}))
+	t.Cleanup(attacker.Close)
+
+	// Both httptest servers listen on 127.0.0.1; different ports make them
+	// different origins — exactly the case the policy must reject.
+	origin := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, attacker.URL+"/collect", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(origin.Close)
+
+	client := mustClient(t, origin.URL+"/mcp", map[string]string{"Authorization": "Bearer secret"})
+	resp, err := client.Post(origin.URL+"/mcp", "application/json", strings.NewReader(`{}`))
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil {
+		t.Fatal("expected cross-origin redirect to be refused, got nil error")
+	}
+	if !strings.Contains(err.Error(), "refusing redirect") {
+		t.Errorf("unexpected error: %v", err)
+	}
+	if n := atomic.LoadInt32(&attackerHits); n != 0 {
+		t.Errorf("redirect target was contacted %d time(s); leaked headers: %v", n, leaked)
+	}
+}
+
+func TestHeaderInjectingClientFollowsSameOriginRedirect(t *testing.T) {
+	var finalAuth string
+	mux := http.NewServeMux()
+	mux.HandleFunc("/mcp", func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/mcp/", http.StatusPermanentRedirect)
+	})
+	mux.HandleFunc("/mcp/", func(w http.ResponseWriter, r *http.Request) {
+		finalAuth = r.Header.Get("Authorization")
+		w.WriteHeader(http.StatusOK)
+	})
+	srv := httptest.NewServer(mux)
+	t.Cleanup(srv.Close)
+
+	client := mustClient(t, srv.URL+"/mcp", map[string]string{"Authorization": "Bearer secret"})
+	resp, err := client.Post(srv.URL+"/mcp", "application/json", strings.NewReader(`{}`))
+	if err != nil {
+		t.Fatalf("same-origin redirect should be followed: %v", err)
+	}
+	_ = resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("expected 200 after redirect, got %d", resp.StatusCode)
+	}
+	if finalAuth != "Bearer secret" {
+		t.Errorf("expected Authorization to be present on same-origin redirect, got %q", finalAuth)
+	}
+}
+
+func TestHeaderInjectingClientStopsAfterMaxRedirects(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Redirect(w, r, "/loop", http.StatusTemporaryRedirect)
+	}))
+	t.Cleanup(srv.Close)
+
+	client := mustClient(t, srv.URL+"/loop", map[string]string{"X-Test": "1"})
+	resp, err := client.Get(srv.URL + "/loop")
+	if resp != nil {
+		_ = resp.Body.Close()
+	}
+	if err == nil || !strings.Contains(err.Error(), "stopped after 10 redirects") {
+		t.Errorf("expected redirect limit error, got %v", err)
+	}
+}
+
+func TestSameOriginOrHTTPSUpgrade(t *testing.T) {
+	cases := []struct {
+		name    string
+		from    string
+		to      string
+		allowed bool
+	}{
+		{"same origin, different path", "https://mcp.example.com/mcp", "https://mcp.example.com/mcp/", true},
+		{"same origin, explicit default port", "https://mcp.example.com/mcp", "https://mcp.example.com:443/mcp", true},
+		{"host case-insensitive", "https://MCP.example.com/mcp", "https://mcp.EXAMPLE.com/mcp", true},
+		{"http to https upgrade on default ports", "http://mcp.example.com/mcp", "https://mcp.example.com/mcp", true},
+		{"https to http downgrade", "https://mcp.example.com/mcp", "http://mcp.example.com/mcp", false},
+		{"different host", "https://mcp.example.com/mcp", "https://evil.example/collect", false},
+		{"subdomain", "https://example.com/mcp", "https://mcp.example.com/mcp", false},
+		{"different port", "http://localhost:8080/mcp", "http://localhost:9090/mcp", false},
+		{"http to https on non-default port", "http://localhost:8080/mcp", "https://localhost:8443/mcp", false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := sameOriginOrHTTPSUpgrade(mustURL(t, tc.from), mustURL(t, tc.to)); got != tc.allowed {
+				t.Errorf("sameOriginOrHTTPSUpgrade(%s, %s) = %v, want %v", tc.from, tc.to, got, tc.allowed)
+			}
+		})
+	}
+}
+
+func TestStreamableHTTPTransportWithHeaders(t *testing.T) {
+	// MCP server behind a bearer-token check
+	srv := mcp.NewServer(&mcp.Implementation{Name: "header-test-server", Version: "1.0.0"}, nil)
+	srv.AddTool(&mcp.Tool{
+		Name:        "ping",
+		Description: "Returns pong",
+		InputSchema: map[string]interface{}{"type": "object", "properties": map[string]interface{}{}},
+	}, func(_ context.Context, _ *mcp.CallToolRequest) (*mcp.CallToolResult, error) {
+		return &mcp.CallToolResult{Content: []mcp.Content{&mcp.TextContent{Text: "pong"}}}, nil
+	})
+	mcpHandler := mcp.NewStreamableHTTPHandler(func(_ *http.Request) *mcp.Server {
+		return srv
+	}, nil)
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer secret" {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		mcpHandler.ServeHTTP(w, r)
+	}))
+	t.Cleanup(ts.Close)
+
+	// mcp.json spec with the new headers field
+	tempDir := t.TempDir()
+	configPath := filepath.Join(tempDir, "mcp.json")
+	mcpConfig := fmt.Sprintf(`{
+		"mcpServers": {
+			"header-server": {
+				"url": %q,
+				"headers": {"Authorization": "Bearer secret"}
+			}
+		}
+	}`, ts.URL)
+	if err := os.WriteFile(configPath, []byte(mcpConfig), 0644); err != nil {
+		t.Fatalf("Failed to write config file: %v", err)
+	}
+
+	cfg := &config.Config{AI: config.AIConfig{MCPConfigFilePath: configPath}}
+	tools, dispatcher, closeFn, err := buildToolsFromConfig(cfg, testLogger())
+	if closeFn != nil {
+		defer closeFn()
+	}
+	if err != nil {
+		t.Fatalf("buildToolsFromConfig failed: %v", err)
+	}
+	if len(tools) != 1 || tools[0].Name != "ping" {
+		t.Fatalf("Expected 1 tool 'ping', got %v", tools)
+	}
+	out, err := dispatcher(context.Background(), ToolCall{Name: "ping", Arguments: `{}`})
+	if err != nil {
+		t.Fatalf("dispatcher failed: %v", err)
+	}
+	if !strings.Contains(out, "pong") {
+		t.Errorf("Expected tool output to contain 'pong', got %q", out)
+	}
+}
+
 // TestHelperProcess is a subprocess helper for TestEnvPassedToCommand.
 // When GO_WANT_HELPER_PROCESS=1, it serves a minimal MCP server on stdio
 // with a check_env tool that returns the value of MCP_TEST_ENV_VALUE.
@@ -250,9 +492,6 @@ func TestHelperProcess(t *testing.T) {
 
 func TestEnvPassedToCommand(t *testing.T) {
 	tempDir := t.TempDir()
-
-	log.SetOutput(io.Discard)
-	defer log.SetOutput(os.Stderr)
 
 	// Config that spawns this test binary as an MCP server subprocess,
 	// passing env vars through the config's env field.
@@ -279,7 +518,7 @@ func TestEnvPassedToCommand(t *testing.T) {
 		},
 	}
 
-	tools, dispatcher, closeFn, err := buildToolsFromConfig(cfg)
+	tools, dispatcher, closeFn, err := buildToolsFromConfig(cfg, testLogger())
 	if err != nil {
 		t.Fatalf("buildToolsFromConfig failed: %v", err)
 	}
@@ -364,4 +603,34 @@ func TestNonSelfServerNotSkipped(t *testing.T) {
 	}
 }
 
+// TestHeaderRoundTripperDoesNotOverrideTransportHeaders: headers the SDK has
+// already set on the request (Accept, Content-Type, ...) must win over a
+// configured value, while absent ones are filled in.
+func TestHeaderRoundTripperDoesNotOverrideTransportHeaders(t *testing.T) {
+	base, seen := recordingTransport()
+	clean, _, _ := sanitizeHeaders(map[string]string{
+		"Authorization": "Bearer secret",
+		"accept":        "text/event-stream",
+		"Content-Type":  "text/plain",
+	})
+	rt := &headerRoundTripper{base: base, origin: mustURL(t, "http://example.com/"), headers: clean}
 
+	req := httptest.NewRequest(http.MethodPost, "http://example.com/", nil)
+	req.Header.Set("Accept", "application/json, text/event-stream")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := rt.RoundTrip(req)
+	if err != nil {
+		t.Fatalf("RoundTrip failed: %v", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if got := seen.Get("Accept"); got != "application/json, text/event-stream" {
+		t.Errorf("Accept = %q, want the transport's value to win", got)
+	}
+	if got := seen.Get("Content-Type"); got != "application/json" {
+		t.Errorf("Content-Type = %q, want the transport's value to win", got)
+	}
+	if got := seen.Get("Authorization"); got != "Bearer secret" {
+		t.Errorf("Authorization = %q, want injected value", got)
+	}
+}

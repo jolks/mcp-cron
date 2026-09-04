@@ -165,6 +165,8 @@ The following command line arguments are supported:
 | `--address` | The address to bind the server to | `localhost` |
 | `--port` | The port to bind the server to | `8080` |
 | `--transport` | Transport mode: `http` or `stdio` | `http` |
+| `--auth-token` | Bearer token required for HTTP transport requests (prefer `MCP_CRON_SERVER_AUTH_TOKEN` to keep it out of process listings) | Not set |
+| `--allow-unauthenticated` | Allow HTTP transport on a non-loopback address without an auth token (dangerous) | `false` |
 | `--log-level` | Logging level: `debug`, `info`, `warn`, `error`, `fatal` | `info` |
 | `--log-file` | Log file path | stdout |
 | `--version` | Show version information and exit | `false` |
@@ -186,6 +188,8 @@ The following environment variables are supported:
 | `MCP_CRON_SERVER_ADDRESS` | The address to bind the server to | `localhost` |
 | `MCP_CRON_SERVER_PORT` | The port to bind the server to | `8080` |
 | `MCP_CRON_SERVER_TRANSPORT` | Transport mode: `http` or `stdio` | `http` |
+| `MCP_CRON_SERVER_AUTH_TOKEN` | Bearer token required for HTTP transport requests. Leading/trailing whitespace (e.g. a trailing newline from a secret file) is trimmed; see [Authentication](#authentication) | Not set |
+| `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED` | Allow HTTP transport on a non-loopback address without an auth token (dangerous). Boolean — see note below | `false` |
 | `MCP_CRON_SERVER_NAME` | **Deprecated** — ignored; the server name is fixed to ensure self-reference detection works correctly | - |
 | `MCP_CRON_SERVER_VERSION` | **Deprecated** — ignored; version is set at build time via ldflags | - |
 | `MCP_CRON_SCHEDULER_DEFAULT_TIMEOUT` | Default timeout for task execution | `10m` |
@@ -201,8 +205,66 @@ The following environment variables are supported:
 | `MCP_CRON_AI_MAX_TOOL_ITERATIONS` | Maximum iterations for tool-enabled tasks | `20` |
 | `MCP_CRON_MCP_CONFIG_FILE_PATH` | Path to MCP configuration file | `~/.cursor/mcp.json` |
 | `MCP_CRON_STORE_DB_PATH` | Path to SQLite database for result history | `~/.mcp-cron/results.db` |
-| `MCP_CRON_PREVENT_SLEEP` | Prevent system from sleeping while mcp-cron is running (macOS and Windows) | `false` |
+| `MCP_CRON_PREVENT_SLEEP` | Prevent system from sleeping while mcp-cron is running (macOS and Windows). Boolean — see note below | `false` |
 | `MCP_CRON_POLL_INTERVAL` | How often to check for due tasks (Go duration format) | `1s` |
+
+Boolean variables accept the forms understood by Go's `strconv.ParseBool`: `1`, `t`, `T`, `TRUE`, `true`, `True`, `0`, `f`, `F`, `FALSE`, `false`, `False`. Any other value (e.g. `yes`) is logged at startup and ignored, leaving the default in place. The same applies to numeric and duration variables that fail to parse.
+
+### Configuration Precedence
+
+Defaults are overridden by environment variables, which are overridden by command-line flags that are explicitly passed — so `--allow-unauthenticated=false` does override `MCP_CRON_SERVER_ALLOW_UNAUTHENTICATED=true`. `mcp-cron -h` shows the effective default for each flag, including values taken from the environment. This includes `--auth-token`: an explicit `--auth-token ""` clears `MCP_CRON_SERVER_AUTH_TOKEN`; the token is the one flag whose default is never shown in `-h`, so the secret cannot leak there. Explicitly blanking a required setting (`--address ""` in HTTP mode, `--db-path ""`, `--ai-model ""`, `--mcp-config-path ""`) is rejected at startup rather than silently misbehaving. String environment variables are trimmed of surrounding whitespace; a blank value counts as unset.
+
+### Authentication
+
+The HTTP transport supports optional bearer-token authentication. When a token is set, every HTTP request must carry an `Authorization: Bearer <token>` header. Requests with a missing, malformed, or wrong token are rejected with `401 Unauthorized` and a `WWW-Authenticate: Bearer` header. The scheme name is case-insensitive; the token itself is compared exactly (in constant time).
+
+**Fail-closed rule**: binding a non-loopback address (e.g. `0.0.0.0`) in HTTP mode **requires** an auth token — without one, mcp-cron refuses to start. This is because the exposed MCP tools (`add_task`, `run_task`, ...) execute arbitrary shell commands; serving them unauthenticated on a network interface would be remote command execution for anyone who can reach the port. The default `localhost` bind needs no token.
+
+"Loopback" means the exact literal `localhost` or a loopback IP (`127.0.0.0/8`, `::1`, including bracketed or zoned forms such as `[::1]` and `::1%lo0`). Other hostnames — even ones that resolve to a loopback address, such as `ip6-localhost` or `localhost.localdomain` — are treated as non-loopback. This is deliberate: names are not resolved at validation time (resolution can change between check and use), and it is the same rule the MCP Go SDK applies to the `Host` header for its DNS-rebinding protection — which is why the match is case-sensitive: a `LOCALHOST` bind would pass here and then be refused with `403` on every request. Use the IP literal, or `--allow-unauthenticated` if you accept the risk. `--address` takes a host only; a value with an embedded port (`127.0.0.1:9000`) is rejected — use `--port`.
+
+If mcp-cron listens on loopback behind a reverse proxy, note that the MCP SDK's DNS-rebinding protection returns `403 Forbidden` for requests whose `Host` header is not a loopback name; configure the proxy to send `Host: localhost:<port>` upstream.
+
+```bash
+# Loopback (default) — no token required
+./mcp-cron
+
+# Non-loopback — token required
+MCP_CRON_SERVER_AUTH_TOKEN="$TOKEN" ./mcp-cron --address 0.0.0.0
+
+# Refused: non-loopback without a token
+./mcp-cron --address 0.0.0.0
+# Invalid configuration: refusing to serve http on non-loopback address "0.0.0.0" without authentication ...
+
+# Explicit opt-out (dangerous): only inside an isolated Docker network or
+# service mesh that already restricts access. mcp-cron logs a WARN line at
+# startup when running this way.
+./mcp-cron --address 0.0.0.0 --allow-unauthenticated
+```
+
+Surrounding whitespace in the token is trimmed (so a secret file created with `echo` still works); a token containing internal whitespace or control characters is rejected at startup, since no HTTP request could ever present it.
+
+Verify with curl:
+```bash
+curl -i http://localhost:8080/                                   # 401 Unauthorized, WWW-Authenticate: Bearer
+curl -i -H "Authorization: Bearer $TOKEN" http://localhost:8080/ # token accepted: any non-401 response
+# (a bare GET returns 400 from the MCP handler — expected; it wants an MCP session)
+```
+
+MCP clients pass the token via the `headers` field:
+```json
+{
+  "mcpServers": {
+    "mcp-cron": {
+      "url": "http://localhost:8080",
+      "headers": {
+        "Authorization": "Bearer <token>"
+      }
+    }
+  }
+}
+```
+
+The same `headers` field works in mcp-cron's own MCP configuration file (`--mcp-config-path`), so AI tasks can connect to bearer-token-protected MCP servers too. Configured headers fill in only where the transport has not already set a value on the request, so `Authorization` and custom headers are sent as written while protocol headers the transport owns (`Accept`, `Content-Type`, `Last-Event-ID`) keep their correct values. `Mcp-Session-Id` and `Mcp-Protocol-Version` are ignored if configured, since a stale value would break session setup. When `headers` is set, redirects are only followed within the configured origin (same scheme, host and port, or an `http`→`https` upgrade on the default ports 80→443); a redirect to any other origin fails the connection so the configured credentials are never sent elsewhere.
 
 ### Sleep Prevention
 
