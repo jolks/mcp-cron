@@ -44,25 +44,25 @@ func (s *MCPServer) registerToolsDeclarative() {
 		},
 		{
 			Name:        "add_task",
-			Description: "Adds a new shell command task. Requires 'name' and 'command'. Provide 'schedule' for recurring execution or omit it to create an on-demand task triggered via run_task. Set 'enabled' to true to activate immediately.",
+			Description: "Adds a new shell command task. Requires 'name' and 'command'. Provide 'schedule' for recurring execution, 'run_at' for one-shot execution at an absolute RFC 3339 timestamp, or omit both for an on-demand task triggered via run_task. 'schedule' and 'run_at' are mutually exclusive. Set 'enabled' to true to activate immediately.",
 			Handler:     s.handleAddTask,
 			Parameters:  TaskParams{},
 		},
 		{
 			Name:        "add_ai_task",
-			Description: "Adds a new AI (LLM) task. Requires 'name' and 'prompt'. Provide 'schedule' for recurring execution or omit it to create an on-demand task triggered via run_task. Set 'enabled' to true to activate immediately.",
+			Description: "Adds a new AI (LLM) task. Requires 'name' and 'prompt'. Provide 'schedule' for recurring execution, 'run_at' for one-shot execution at an absolute RFC 3339 timestamp, or omit both for an on-demand task triggered via run_task. 'schedule' and 'run_at' are mutually exclusive. Set 'enabled' to true to activate immediately.",
 			Handler:     s.handleAddAITask,
 			Parameters:  AITaskParams{},
 		},
 		{
 			Name:        "add_http_task",
-			Description: "Adds a new HTTP (webhook) task. Requires 'name' and 'url'. 'method' defaults to POST. 'headers' is a JSON object of string→string. 'body' is the request body. Provide 'schedule' for recurring execution or omit it to create an on-demand task triggered via run_task. The result captures HTTP status (as exit_code), response body preview (as output), and round-trip latency (as duration).",
+			Description: "Adds a new HTTP (webhook) task. Requires 'name' and 'url'. 'method' defaults to POST. 'headers' is a JSON object of string→string. 'body' is the request body. Provide 'schedule' for recurring execution, 'run_at' for one-shot execution at an absolute RFC 3339 timestamp, or omit both for an on-demand task triggered via run_task. 'schedule' and 'run_at' are mutually exclusive. The result captures HTTP status (as exit_code), response body preview (as output), and round-trip latency (as duration).",
 			Handler:     s.handleAddHTTPTask,
 			Parameters:  TaskParams{},
 		},
 		{
 			Name:        "update_task",
-			Description: "Updates an existing task. Requires 'id'. Only provided fields are updated; omitted fields remain unchanged.",
+			Description: "Updates an existing task. Requires 'id'. Only provided fields are updated; omitted fields remain unchanged. Set 'run_at' to an absolute RFC 3339 timestamp to arm a one-shot task, or null to clear it; it is mutually exclusive with 'schedule'.",
 			Handler:     s.handleUpdateTask,
 			Parameters:  AITaskParams{},
 		},
@@ -197,6 +197,10 @@ func collectFields(t reflect.Type, properties map[string]interface{}, required *
 
 // goTypeToJSONType maps Go types to JSON Schema types
 func goTypeToJSONType(t reflect.Type) string {
+	if t.Kind() == reflect.Ptr {
+		return goTypeToJSONType(t.Elem())
+	}
+
 	switch t.Kind() {
 	case reflect.String:
 		return "string"

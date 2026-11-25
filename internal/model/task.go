@@ -45,6 +45,7 @@ type Task struct {
 	Headers     map[string]string `json:"headers,omitempty" description:"HTTP request headers for HTTP tasks"`
 	Body        string     `json:"body,omitempty" description:"HTTP request body for HTTP tasks"`
 	Schedule    string     `json:"schedule"`
+	RunAt       *time.Time `json:"runAt,omitempty"`
 	Enabled     bool       `json:"enabled"`
 	Type        TaskType   `json:"type"`
 	LastRun     time.Time  `json:"lastRun,omitempty"`
@@ -85,6 +86,7 @@ type TaskStore interface {
 	LoadTasks() ([]*Task, error)
 	GetDueTasks(now time.Time) ([]*Task, error)
 	AdvanceNextRun(taskID string, currentNextRun time.Time, newNextRun time.Time) (bool, error)
+	ConsumeOneShot(taskID string, currentNextRun time.Time) (bool, error)
 }
 
 // MaxQueryRows is the maximum number of rows returned by QueryDB.
