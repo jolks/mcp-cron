@@ -1383,3 +1383,86 @@ func TestOnDemandTaskPollExecution(t *testing.T) {
 		t.Error("expected on-demand task to have zero NextRun after execution")
 	}
 }
+
+func TestOneShotFailureIsConsumedWithoutRetry(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	var executionCount atomic.Int32
+
+	s := NewScheduler(createTestConfig(), testLogger())
+	s.SetTaskStore(taskStore)
+	s.SetTaskExecutor(&MockTaskExecutor{
+		ExecuteFunc: func(context.Context, *model.Task, time.Duration) error {
+			executionCount.Add(1)
+			return fmt.Errorf("expected one-shot failure")
+		},
+	})
+
+	runAt := time.Now().UTC().Add(-time.Second)
+	if err := s.AddTask(&model.Task{
+		ID: "failed-one-shot", Name: "Failed One-Shot", Type: model.TypeShellCommand,
+		Command: "false", RunAt: &runAt, Enabled: true,
+	}); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+
+	s.pollTick()
+	if err := s.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	s.pollTick()
+	if got := executionCount.Load(); got != 1 {
+		t.Fatalf("execution count after a second poll = %d, want 1", got)
+	}
+	if got, err := s.GetTask("failed-one-shot"); err != nil {
+		t.Fatalf("GetTask: %v", err)
+	} else if got.Status != model.StatusFailed {
+		t.Fatalf("status = %s, want %s", got.Status, model.StatusFailed)
+	}
+}
+
+func TestRunTaskNowConsumesArmedOneShot(t *testing.T) {
+	taskStore := newTestStoreForScheduler(t)
+	var executionCount atomic.Int32
+
+	s := NewScheduler(createTestConfig(), testLogger())
+	s.SetTaskStore(taskStore)
+	s.SetTaskExecutor(&MockTaskExecutor{
+		ExecuteFunc: func(context.Context, *model.Task, time.Duration) error {
+			executionCount.Add(1)
+			return nil
+		},
+	})
+
+	runAt := time.Now().UTC().Add(time.Hour)
+	if err := s.AddTask(&model.Task{
+		ID: "manual-one-shot", Name: "Manual One-Shot", Type: model.TypeShellCommand,
+		Command: "echo manual", RunAt: &runAt, Enabled: true,
+	}); err != nil {
+		t.Fatalf("AddTask: %v", err)
+	}
+	if err := s.RunTaskNow("manual-one-shot"); err != nil {
+		t.Fatalf("RunTaskNow: %v", err)
+	}
+	armed, err := s.GetTask("manual-one-shot")
+	if err != nil {
+		t.Fatalf("GetTask after RunTaskNow: %v", err)
+	}
+	if armed.RunAt == nil || !armed.RunAt.Equal(runAt) || armed.NextRun.After(time.Now()) {
+		t.Fatalf("RunTaskNow did not arm immediate one-shot: %+v", armed)
+	}
+
+	s.pollTick()
+	if err := s.Stop(); err != nil {
+		t.Fatalf("Stop: %v", err)
+	}
+	if got := executionCount.Load(); got != 1 {
+		t.Fatalf("execution count = %d, want 1", got)
+	}
+	loaded, err := taskStore.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if loaded[0].Enabled || loaded[0].RunAt != nil || !loaded[0].NextRun.IsZero() {
+		t.Fatalf("manually consumed task persisted as armed: %+v", loaded[0])
+	}
+}

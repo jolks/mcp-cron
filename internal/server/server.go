@@ -33,7 +33,8 @@ var osOpenFile = os.OpenFile
 type TaskParams struct {
 	ID          string            `json:"id,omitempty" description:"task ID"`
 	Name        string            `json:"name" description:"task name (required)"`
-	Schedule    string            `json:"schedule,omitempty" description:"cron expression for recurring execution (e.g. '*/5 * * * *', '@hourly'). Omit to create an on-demand task triggered via run_task."`
+	Schedule    string            `json:"schedule,omitempty" description:"cron expression for recurring execution (e.g. '*/5 * * * *', '@hourly'). Omit when using run_at for a one-shot task or to create an on-demand task triggered via run_task."`
+	RunAt       *string           `json:"run_at,omitempty" description:"absolute RFC 3339 timestamp for one-shot execution. Normalize to UTC; mutually exclusive with schedule."`
 	Type        string            `json:"type,omitempty" description:"task type: 'shell_command', 'AI', or 'http'"`
 	Command     string            `json:"command,omitempty" description:"shell command to execute (required for shell_command tasks)"`
 	URL         string            `json:"url,omitempty" description:"URL to request (required for http tasks)"`
@@ -307,6 +308,13 @@ func (s *MCPServer) handleAddTask(_ context.Context, request *mcp.CallToolReques
 	if err := validateShellTaskParams(params.Name, params.Command); err != nil {
 		return nil, err
 	}
+	runAt, err := parseRunAt(params.RunAt)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateTaskSchedule(params.Schedule, runAt); err != nil {
+		return nil, err
+	}
 
 	s.logger.Debugf("Handling add_task request for task %s", params.Name)
 
@@ -314,6 +322,7 @@ func (s *MCPServer) handleAddTask(_ context.Context, request *mcp.CallToolReques
 	task := createBaseTask(params.Name, params.Schedule, params.Description, params.Enabled)
 	task.Type = model.TypeShellCommand
 	task.Command = params.Command
+	task.RunAt = runAt
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
@@ -335,6 +344,13 @@ func (s *MCPServer) handleAddAITask(_ context.Context, request *mcp.CallToolRequ
 	if err := validateAITaskParams(params.Name, params.Prompt); err != nil {
 		return nil, err
 	}
+	runAt, err := parseRunAt(params.RunAt)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateTaskSchedule(params.Schedule, runAt); err != nil {
+		return nil, err
+	}
 
 	s.logger.Debugf("Handling add_ai_task request for task %s", params.Name)
 
@@ -342,6 +358,7 @@ func (s *MCPServer) handleAddAITask(_ context.Context, request *mcp.CallToolRequ
 	task := createBaseTask(params.Name, params.Schedule, params.Description, params.Enabled)
 	task.Type = model.TypeAI
 	task.Prompt = params.Prompt
+	task.RunAt = runAt
 
 	// Add task to scheduler
 	if err := s.scheduler.AddTask(task); err != nil {
@@ -363,6 +380,13 @@ func (s *MCPServer) handleAddHTTPTask(_ context.Context, request *mcp.CallToolRe
 	if err := validateHTTPTaskParams(params.Name, params.URL); err != nil {
 		return nil, err
 	}
+	runAt, err := parseRunAt(params.RunAt)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateTaskSchedule(params.Schedule, runAt); err != nil {
+		return nil, err
+	}
 
 	s.logger.Debugf("Handling add_http_task request for task %s", params.Name)
 
@@ -372,6 +396,7 @@ func (s *MCPServer) handleAddHTTPTask(_ context.Context, request *mcp.CallToolRe
 	task.Method = params.Method
 	task.Headers = params.Headers
 	task.Body = params.Body
+	task.RunAt = runAt
 
 	if err := s.scheduler.AddTask(task); err != nil {
 		return nil, err
@@ -421,20 +446,23 @@ func (s *MCPServer) handleUpdateTask(_ context.Context, request *mcp.CallToolReq
 	if err != nil {
 		return nil, err
 	}
+	updatedTask := *existingTask
 
 	// Update fields with provided values
-	updateTaskFields(existingTask, params, request.Params.Arguments)
-
-	// Update task in scheduler
-	if err := s.scheduler.UpdateTask(existingTask); err != nil {
+	if err := updateTaskFields(&updatedTask, params, request.Params.Arguments); err != nil {
 		return nil, err
 	}
 
-	return createTaskResponse(existingTask)
+	// Update task in scheduler
+	if err := s.scheduler.UpdateTask(&updatedTask); err != nil {
+		return nil, err
+	}
+
+	return createTaskResponse(&updatedTask)
 }
 
 // updateTaskFields updates task fields with provided values
-func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
+func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) error {
 	// Update non-empty string fields
 	if params.Name != "" {
 		task.Name = params.Name
@@ -483,9 +511,21 @@ func updateTaskFields(task *model.Task, params AITaskParams, rawJSON []byte) {
 		if _, exists := rawParams["enabled"]; exists {
 			task.Enabled = params.Enabled
 		}
+		if _, exists := rawParams["run_at"]; exists {
+			if params.RunAt == nil {
+				task.RunAt = nil
+			} else {
+				runAt, err := parseRunAt(params.RunAt)
+				if err != nil {
+					return err
+				}
+				task.RunAt = runAt
+			}
+		}
 	}
 
 	task.UpdatedAt = time.Now()
+	return nil
 }
 
 // handleRemoveTask removes a task

@@ -4,6 +4,7 @@ package server
 import (
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/jolks/mcp-cron/internal/errors"
 	"github.com/jolks/mcp-cron/internal/model"
@@ -121,6 +122,26 @@ func createResultsResponse(results []*model.Result) (*mcp.CallToolResult, error)
 func validateTaskParams(name string) error {
 	if name == "" {
 		return errors.InvalidInput("missing required field: name is required")
+	}
+	return nil
+}
+
+func parseRunAt(value *string) (*time.Time, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	runAt, err := time.Parse(time.RFC3339, *value)
+	if err != nil {
+		return nil, errors.InvalidInput("run_at must be an RFC 3339 timestamp")
+	}
+	runAt = runAt.UTC()
+	return &runAt, nil
+}
+
+func validateTaskSchedule(schedule string, runAt *time.Time) error {
+	if schedule != "" && runAt != nil {
+		return errors.InvalidInput("schedule and run_at are mutually exclusive")
 	}
 	return nil
 }

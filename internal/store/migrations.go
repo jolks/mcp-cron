@@ -80,6 +80,13 @@ var migrations = []migration{
 			return nil
 		},
 	},
+	{
+		version: 5,
+		up: func(tx *sql.Tx) error {
+			_, err := tx.Exec(`ALTER TABLE tasks ADD COLUMN run_at TEXT DEFAULT ''`)
+			return err
+		},
+	},
 }
 
 // runMigrations ensures the schema_version table exists and runs any pending migrations.

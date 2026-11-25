@@ -76,6 +76,9 @@ func (s *Scheduler) AddTask(task *model.Task) error {
 	if _, exists := s.tasks[task.ID]; exists {
 		return errors.AlreadyExists("task", task.ID)
 	}
+	if task.Schedule != "" && task.RunAt != nil {
+		return errors.InvalidInput("schedule and run_at are mutually exclusive")
+	}
 
 	// Compute next_run for enabled tasks with a schedule
 	if task.Enabled && task.Schedule != "" {
@@ -85,6 +88,11 @@ func (s *Scheduler) AddTask(task *model.Task) error {
 			return err
 		}
 		task.NextRun = nextRun
+	} else if task.RunAt != nil {
+		task.NextRun = time.Time{}
+		if task.Enabled {
+			task.NextRun = task.RunAt.In(s.now().Location())
+		}
 	}
 
 	// Persist to store first
@@ -136,6 +144,9 @@ func (s *Scheduler) EnableTask(taskID string) error {
 	if task.Enabled {
 		return nil // Already enabled
 	}
+	if task.Schedule != "" && task.RunAt != nil {
+		return errors.InvalidInput("schedule and run_at are mutually exclusive")
+	}
 
 	task.Enabled = true
 	task.Status = model.StatusPending
@@ -150,6 +161,8 @@ func (s *Scheduler) EnableTask(taskID string) error {
 			return err
 		}
 		task.NextRun = nextRun
+	} else if task.RunAt != nil {
+		task.NextRun = task.RunAt.In(s.now().Location())
 	}
 
 	// Persist to store
@@ -228,6 +241,10 @@ func (s *Scheduler) UpdateTask(task *model.Task) error {
 		return errors.NotFound("task", task.ID)
 	}
 
+	if task.Schedule != "" && task.RunAt != nil {
+		return errors.InvalidInput("schedule and run_at are mutually exclusive")
+	}
+
 	// Recompute next_run if enabled and has a schedule
 	if task.Enabled && task.Schedule != "" {
 		nextRun, err := s.computeNextRun(task.Schedule)
@@ -235,6 +252,8 @@ func (s *Scheduler) UpdateTask(task *model.Task) error {
 			return err
 		}
 		task.NextRun = nextRun
+	} else if task.Enabled && task.RunAt != nil {
+		task.NextRun = task.RunAt.In(s.now().Location())
 	} else if !task.Enabled {
 		task.NextRun = time.Time{} // Clear next_run for disabled tasks
 	} else {
@@ -332,6 +351,12 @@ func (s *Scheduler) LoadTasks() error {
 				}
 			}
 		}
+		if task.Enabled && task.NextRun.IsZero() && task.RunAt != nil && task.Schedule == "" {
+			task.NextRun = task.RunAt.In(s.now().Location())
+			if err := s.taskStore.UpdateTask(task); err != nil {
+				return fmt.Errorf("persist one-shot next_run: %w", err)
+			}
+		}
 	}
 
 	return nil
@@ -404,6 +429,30 @@ func (s *Scheduler) pollTick() {
 	}
 
 	for _, task := range dueTasks {
+		if task.Schedule == "" && task.RunAt != nil {
+			claimed, err := s.taskStore.ConsumeOneShot(task.ID, task.NextRun)
+			if err != nil {
+				s.logger.Errorf("Poll: failed to consume one-shot task %s: %v", task.ID, err)
+				continue
+			}
+			if !claimed {
+				continue
+			}
+
+			s.mu.Lock()
+			if memTask, exists := s.tasks[task.ID]; exists {
+				memTask.Enabled = false
+				memTask.RunAt = nil
+				memTask.NextRun = time.Time{}
+				memTask.Status = model.StatusDisabled
+			}
+			s.mu.Unlock()
+
+			s.taskWg.Add(1)
+			go s.executeTask(task)
+			continue
+		}
+
 		// Compute next_run from schedule (on-demand tasks go back to idle)
 		var newNextRun time.Time
 		if task.Schedule != "" {

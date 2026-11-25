@@ -997,3 +997,102 @@ func TestClosePreventsFurtherOps(t *testing.T) {
 		t.Error("expected error after Close, got nil")
 	}
 }
+
+func TestRunAtRoundTripNormalizesUTC(t *testing.T) {
+	s := newTestStore(t)
+
+	location := time.FixedZone("UTC+02", 2*60*60)
+	runAt := time.Date(2026, time.January, 10, 14, 30, 0, 123456789, location)
+	task := &model.Task{
+		ID: "one-shot-round-trip", Name: "One shot", Type: model.TypeShellCommand,
+		Command: "echo once", RunAt: &runAt, NextRun: runAt, Enabled: true,
+		CreatedAt: runAt, UpdatedAt: runAt,
+	}
+
+	if err := s.SaveTask(task); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	tasks, err := s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 1 || tasks[0].RunAt == nil {
+		t.Fatalf("expected one task with RunAt, got %#v", tasks)
+	}
+	got := tasks[0]
+	if !got.RunAt.Equal(runAt) {
+		t.Errorf("RunAt = %v, want instant %v", got.RunAt, runAt)
+	}
+	if got.RunAt.Location() != time.UTC {
+		t.Errorf("RunAt location = %v, want UTC", got.RunAt.Location())
+	}
+	if !got.NextRun.Equal(runAt) || got.NextRun.Format(timeFormat) != runAt.Format(timeFormat) {
+		t.Errorf("NextRun = %v, want original representation %v", got.NextRun, runAt)
+	}
+
+	updatedRunAt := runAt.Add(time.Hour).In(location)
+	task.RunAt = &updatedRunAt
+	task.NextRun = updatedRunAt
+	if err := s.UpdateTask(task); err != nil {
+		t.Fatalf("UpdateTask: %v", err)
+	}
+	tasks, err = s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks after update: %v", err)
+	}
+	if !tasks[0].RunAt.Equal(updatedRunAt) {
+		t.Errorf("updated RunAt = %v, want instant %v", tasks[0].RunAt, updatedRunAt)
+	}
+}
+
+func TestConsumeOneShot(t *testing.T) {
+	s := newTestStore(t)
+
+	now := time.Now().UTC().Truncate(time.Microsecond)
+	runAt := now.Add(time.Minute)
+	if err := s.SaveTask(&model.Task{
+		ID: "consume-one-shot", Name: "Consume", Type: model.TypeShellCommand,
+		Command: "echo consume", RunAt: &runAt, NextRun: runAt, Enabled: true,
+		CreatedAt: now, UpdatedAt: now,
+	}); err != nil {
+		t.Fatalf("SaveTask: %v", err)
+	}
+
+	consumed, err := s.ConsumeOneShot("consume-one-shot", runAt)
+	if err != nil {
+		t.Fatalf("ConsumeOneShot: %v", err)
+	}
+	if !consumed {
+		t.Fatal("expected one-shot to be consumed")
+	}
+
+	tasks, err := s.LoadTasks()
+	if err != nil {
+		t.Fatalf("LoadTasks: %v", err)
+	}
+	if len(tasks) != 1 {
+		t.Fatalf("expected one task, got %d", len(tasks))
+	}
+	got := tasks[0]
+	if got.Enabled {
+		t.Error("consumed task is enabled, want false")
+	}
+	if got.RunAt != nil {
+		t.Errorf("consumed RunAt = %v, want nil", got.RunAt)
+	}
+	if !got.NextRun.IsZero() {
+		t.Errorf("consumed NextRun = %v, want zero", got.NextRun)
+	}
+	if got.Status != model.StatusDisabled {
+		t.Errorf("consumed Status = %q, want %q", got.Status, model.StatusDisabled)
+	}
+
+	consumed, err = s.ConsumeOneShot("consume-one-shot", runAt)
+	if err != nil {
+		t.Fatalf("ConsumeOneShot a second time: %v", err)
+	}
+	if consumed {
+		t.Fatal("expected consumed one-shot not to be consumed again")
+	}
+}
